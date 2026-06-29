@@ -7,6 +7,7 @@ project_root=$(cd "$script_dir/.." && pwd -P)
 fixture_source_dir="$project_root/templates/controlled-source-demo/fixtures/controlled_inputs"
 proc_source_dir="$project_root/templates/controlled-source-demo/procs"
 script_source_dir="$project_root/templates/controlled-source-demo/scripts"
+expected_tag=controlled-source-demo-v0.1.0
 
 repo_display=$controlled_source_repo
 repo_parent=$(dirname -- "$controlled_source_repo")
@@ -86,4 +87,38 @@ chmod 0755 \
 
 printf 'Synced controlled fixture inputs into %s/fixtures/controlled_inputs\n' "$repo_display"
 printf 'Synced controlled scripts into %s/{procs,scripts}\n' "$repo_display"
-printf 'Fixture files are ready for the controlled source commit/tag step owned by ansible-mvp-izo.2.4.\n'
+
+git -C "$controlled_source_repo" add -- fixtures procs scripts
+
+if ! git -C "$controlled_source_repo" rev-parse --verify HEAD >/dev/null 2>&1; then
+  git -C "$controlled_source_repo" \
+    -c user.name='Controlled Source Bootstrap' \
+    -c user.email='controlled-source-bootstrap@example.invalid' \
+    commit -m 'Bootstrap controlled source demo'
+elif ! git -C "$controlled_source_repo" diff --cached --quiet; then
+  git -C "$controlled_source_repo" \
+    -c user.name='Controlled Source Bootstrap' \
+    -c user.email='controlled-source-bootstrap@example.invalid' \
+    commit -m 'Update controlled source demo'
+else
+  printf 'Controlled source contents already committed in %s\n' "$repo_display"
+fi
+
+resolved_commit=$(git -C "$controlled_source_repo" rev-parse HEAD)
+
+if git -C "$controlled_source_repo" rev-parse --verify --quiet "refs/tags/$expected_tag" >/dev/null; then
+  tag_commit=$(git -C "$controlled_source_repo" rev-list -n 1 "$expected_tag")
+  if [[ "$tag_commit" != "$resolved_commit" ]]; then
+    fail "controlled source tag $expected_tag points at $tag_commit, not current commit $resolved_commit"
+  fi
+  printf 'Verified controlled source tag %s at %s\n' "$expected_tag" "$resolved_commit"
+else
+  git -C "$controlled_source_repo" tag "$expected_tag" "$resolved_commit"
+  printf 'Created controlled source tag %s at %s\n' "$expected_tag" "$resolved_commit"
+fi
+
+if [[ -n $(git -C "$controlled_source_repo" status --porcelain) ]]; then
+  fail "controlled source Git worktree is not clean after bootstrap: $repo_display"
+fi
+
+printf 'Controlled source demo is committed, tagged, and clean at %s\n' "$resolved_commit"
