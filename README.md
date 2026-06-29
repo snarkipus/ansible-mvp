@@ -20,6 +20,75 @@ The diagram below captures the current simulation/data workflow before adding th
 
 ![Pre-MVP baseline simulation workflow](docs/current-sim-model.png)
 
+## Implemented MVP Wrapper Architecture
+
+The MVP wraps the baseline workflow with a provenance gate, stage contract, evidence sidecar, and manifest assembly while leaving the simulation runtime shape intact.
+
+```mermaid
+flowchart TD
+    operator["Operator / Engineer<br/>Ubuntu or WSL shell"]
+    ansible["Ansible playbook<br/>run_synthetic_workflow.yml"]
+    make["Make stage contract<br/>preflight -> prepare -> materialize -> mock LSF<br/>simulate -> extract -> reports -> inventory -> validate -> manifest"]
+
+    subgraph wrapper["Wrapper repo: ansible-mvp"]
+        wrapperFiles["Ansible, Makefile, configs<br/>Python provenance CLI/helpers"]
+    end
+
+    subgraph controlled["Controlled source repo: ../controlled-source-demo"]
+        fixtures["fixtures/controlled_inputs<br/>dirA/dirB/dirC ex*.dat"]
+        scripts["Git-tracked scripts<br/>procs/run-script.sh<br/>scripts/synthetic_sim_engine.sh<br/>scripts/extract_required.pl<br/>scripts/ad_hoc_extract.py"]
+        tag["clean resolved ref<br/>controlled-source-demo-v0.1.0"]
+    end
+
+    preflight["Hard preflight gate<br/>clean repos, resolved refs, tracked scripts,<br/>approved command paths"]
+
+    subgraph run["runs/{run_id}/"]
+        subgraph sim["sim-run-root/ preserved simulation contract"]
+            input["input/dirA|dirB|dirC/ex*.dat"]
+            procs["procs/run-script.sh"]
+            raw["lists/dirC/sim-out.dat"]
+            files["files/dirA|dirB|dirC/"]
+        end
+
+        subgraph prov["provenance/ wrapper-owned sidecar"]
+            pf["preflight.json"]
+            sched["scheduler/submission.yaml"]
+            logs["logs/*.stage.json"]
+            inv["inventories/*.json"]
+            vals["validations/*.json"]
+            extracted["products/extracted/*.csv"]
+            reports["products/reports<br/>summary.xlsx, chart.png, briefing.pptx"]
+            manifest["manifest.yaml<br/>run provenance spine"]
+        end
+    end
+
+    operator --> ansible --> make
+    make --> wrapperFiles
+    make --> preflight
+    wrapperFiles --> preflight
+    fixtures --> preflight
+    scripts --> preflight
+    tag --> preflight
+    preflight --> input
+    preflight --> procs
+    procs --> raw
+    raw --> extracted --> reports
+    make --> sched
+    make --> logs
+    input --> inv
+    procs --> inv
+    raw --> inv
+    extracted --> inv
+    reports --> inv
+    extracted --> vals
+    pf --> manifest
+    sched --> manifest
+    logs --> manifest
+    inv --> manifest
+    vals --> manifest
+    reports --> manifest
+```
+
 ## MVP Boundary
 
 In scope:
