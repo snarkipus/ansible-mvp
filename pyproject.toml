@@ -1,0 +1,56 @@
+[project]
+name = "ansible-mvp-provenance"
+version = "0.1.0"
+description = "Local provenance-first synthetic workflow MVP helpers."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "matplotlib>=3.9",
+    "openpyxl>=3.1",
+    "python-pptx>=1.0",
+    "PyYAML>=6.0",
+]
+
+[dependency-groups]
+dev = [
+    "mypy>=1.10",
+    "pytest>=8.2",
+    "ruff>=0.5",
+]
+
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/provenance"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["provenance"]
+
+[tool.mypy]
+python_version = "3.11"
+files = ["src/provenance"]
+pretty = true
+show_error_codes = true
+ignore_missing_imports = false
+
+[[tool.mypy.overrides]]
+module = [
+    "matplotlib.*",
+    "openpyxl.*",
+    "pptx.*",
+    "yaml.*",
+]
+ignore_missing_imports = true
