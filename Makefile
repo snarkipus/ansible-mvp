@@ -31,7 +31,10 @@ preflight: ## Run the Git-controlled source entrance gate before workflow stages
 		--output "$(PROVENANCE_ROOT)/preflight.json"
 
 prepare-workspace: ## Prepare runs/$(RUN_ID)/sim-run-root and provenance sidecar directories.
-	@$(MAKE) _not-implemented TARGET=$@ BEAD=ansible-mvp-izo.4.4
+	uv run provenance prepare-workspace \
+		--config configs/run.synthetic.yaml \
+		--run-id "$(RUN_ID)" \
+		--workspace-root .
 
 materialize-inputs: ## Copy controlled fixture inputs into the run workspace.
 	@$(MAKE) _not-implemented TARGET=$@ BEAD=ansible-mvp-izo.4.5

@@ -32,6 +32,7 @@ from provenance.manifest import (
 )
 from provenance.preflight import PreflightError, run_preflight
 from provenance.validation import CSVShapeExpectation, validate_csv_product
+from provenance.workspace import prepare_workspace
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -74,6 +75,15 @@ def _build_parser() -> argparse.ArgumentParser:
     preflight.add_argument("--controlled-source-ref", required=True)
     preflight.add_argument("--output", type=Path, help="optional JSON output path")
     preflight.set_defaults(func=_cmd_preflight)
+
+    workspace = subparsers.add_parser(
+        "prepare-workspace", help="prepare separated run and provenance workspaces"
+    )
+    workspace.add_argument("--config", type=Path, default=Path("configs/run.synthetic.yaml"))
+    workspace.add_argument("--run-id", required=True)
+    workspace.add_argument("--workspace-root", type=Path, default=Path("."))
+    workspace.add_argument("--output", type=Path, help="optional JSON output path")
+    workspace.set_defaults(func=_cmd_prepare_workspace)
 
     inventory = subparsers.add_parser("inventory", help="inventory files under a root")
     inventory.add_argument("root", type=Path)
@@ -139,6 +149,16 @@ def _cmd_preflight(args: argparse.Namespace) -> int:
         wrapper_repo=args.wrapper_repo,
         controlled_source_repo=args.controlled_source_repo,
         controlled_source_ref=args.controlled_source_ref,
+    )
+    _write_json(result.to_dict(), args.output)
+    return 0
+
+
+def _cmd_prepare_workspace(args: argparse.Namespace) -> int:
+    result = prepare_workspace(
+        config_path=args.config,
+        run_id=args.run_id,
+        workspace_root=args.workspace_root,
     )
     _write_json(result.to_dict(), args.output)
     return 0
