@@ -88,11 +88,13 @@ runs/{run_id}/
 │       └── run-script.sh
 └── provenance/
     ├── manifest.yaml
-    ├── run_config.yaml
+    ├── preflight.json
     ├── logs/
     ├── inventories/
     ├── scheduler/
     ├── validations/
+    │   ├── manifest_smoke.json
+    │   └── required_extract.json
     └── products/
         ├── extracted/
         └── reports/
@@ -108,7 +110,7 @@ runs/{run_id}/
 - `sim-run-root/procs/`: materialized runtime invocation scripts.
 - `provenance/products/extracted/`: derived CSV outputs generated from raw simulation outputs.
 - `provenance/products/reports/`: generated XLSX/PPTX/figure artifacts.
-- `provenance/logs/`: logs for Ansible, Make, mock LSF, simulation, extraction, validation, and report generation.
+- `provenance/logs/`: stage logs and stage evidence for simulation, extraction, and report generation; Ansible itself runs the Make contract rather than writing a separate wrapper log file.
 - `provenance/manifest.yaml`: the run-level provenance spine.
 
 The repeated `dirA`, `dirB`, and `dirC` folder names are intentional. Tools and manifests must identify artifacts by full relative path, simulation area, and logical group, not by leaf directory name alone.
@@ -151,12 +153,17 @@ Expected result:
 
 ```text
 runs/demo_001/provenance/manifest.yaml
+runs/demo_001/provenance/preflight.json
 runs/demo_001/provenance/products/extracted/required.csv
 runs/demo_001/provenance/products/extracted/ad_hoc.csv
 runs/demo_001/provenance/products/reports/summary.xlsx
 runs/demo_001/provenance/products/reports/chart.png
 runs/demo_001/provenance/products/reports/briefing.pptx
 runs/demo_001/provenance/logs/
+runs/demo_001/provenance/inventories/
+runs/demo_001/provenance/scheduler/submission.yaml
+runs/demo_001/provenance/validations/required_extract.json
+runs/demo_001/provenance/validations/manifest_smoke.json
 runs/demo_001/sim-run-root/lists/
 runs/demo_001/sim-run-root/files/
 ```
@@ -200,11 +207,11 @@ make check
 make clean
 ```
 
-Ansible calls these targets or equivalent helper commands while aggregating logs and run metadata. For focused debugging, keep the same `RUN_ID`, `CONTROLLED_SOURCE_REPO`, and `CONTROLLED_SOURCE_REF` values and do not bypass `make preflight`.
+The Ansible playbook invokes these Make targets in the order configured by `ansible/inventory/group_vars/all.yml`: `preflight`, workspace preparation, materialization, mock LSF submission, simulation, extraction, reporting, inventories, validation, manifest assembly, and manifest smoke validation. For focused debugging, keep the same `RUN_ID`, `CONTROLLED_SOURCE_REPO`, and `CONTROLLED_SOURCE_REF` values and do not bypass `make preflight`.
 
 ## Controlled Source Gate
 
-Before execution, the MVP should verify:
+Before execution, `make preflight` verifies:
 
 - controlled source repository exists,
 - requested ref/tag/commit resolves,
@@ -213,7 +220,7 @@ Before execution, the MVP should verify:
 - required scripts are addressed by repo-relative paths,
 - no stage executes untracked scripts from arbitrary filesystem locations.
 
-The manifest should record:
+The manifest records:
 
 - repository path,
 - requested ref,
@@ -240,7 +247,7 @@ For large production raw outputs, the future policy may record size and modifica
 
 ## Manifest Expectations
 
-`manifest.yaml` should include, at minimum:
+`manifest.yaml` includes the implemented provenance spine:
 
 - run identity,
 - timestamps,
@@ -258,7 +265,7 @@ For large production raw outputs, the future policy may record size and modifica
 
 ## LSF Integration Placeholder
 
-The synthetic MVP should emulate LSF behavior only. The manifest should still reserve space for future production metadata such as:
+The synthetic MVP emulates LSF behavior only through `make submit-mock-lsf`, which writes `provenance/scheduler/submission.yaml`. The manifest reserves space for future production metadata such as:
 
 - `bsub` command,
 - LSF job ID,
@@ -282,17 +289,15 @@ A successful MVP run should satisfy:
 - Required scripts come from a clean Git-controlled source repository.
 - The run fails if required scripts are untracked or the controlled source worktree is dirty.
 - `manifest.yaml` captures the complete synthetic run story.
-- Basic row/column/header-count validation is stubbed or performed for generated CSV products.
-- Tests or smoke checks verify inventory, hashing, and manifest generation.
+- Basic row/column/header-count validation is performed for the required CSV product and recorded in `provenance/validations/required_extract.json`.
+- Tests and the manifest smoke check verify inventory, hashing, and manifest generation.
 
-## Open Design Gaps
+## Known Limitations and Deferred Production Decisions
 
-- Exact production LSF integration mode: submit from login node, run inside allocated job, or both.
-- Final production hashing policy for very large outputs.
-- Whether small controlled input files should be Git-tracked or only Git-referenced through controlled source/config repositories.
-- Whether manifest validation should remain lightweight or evolve into a formal schema.
-- How much Excel/report generation should be represented as real generated artifacts versus opaque production stages.
-- How generated products should be promoted, archived, or released after the provenance MVP proves value.
+- Real LSF integration is deferred; no `bsub`, `bjobs`, `bhist`, or `bacct` commands are required by this MVP.
+- The production hash policy for very large outputs remains deferred; the local synthetic demo hashes small controlled inputs and derived products with SHA-256.
+- Manifest validation is currently lightweight: required sections/key values are smoke-checked rather than validated against a formal schema.
+- Long-term artifact archival, cataloging, promotion, and release workflows are intentionally outside this scaffold.
 
 ## Current Design Principle
 
