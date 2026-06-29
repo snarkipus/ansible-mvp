@@ -180,6 +180,30 @@ def run_required_extraction(
     )
 
 
+def run_ad_hoc_extraction(
+    *,
+    config_path: Path | str,
+    run_id: str,
+    controlled_source_repo: Path | str,
+    workspace_root: Path | str = Path("."),
+) -> StageResult:
+    """Execute the controlled ad hoc extraction stage.
+
+    The ad hoc extractor is a controlled source script that summarizes raw
+    simulation output into ``provenance/products/extracted/ad_hoc.csv``. The
+    derived CSV stays outside ``sim-run-root`` while stage evidence links the
+    raw input, controlled command, logs, return code, and hashed output.
+    """
+
+    return _run_configured_stage(
+        config_path=Path(config_path),
+        run_id=run_id,
+        controlled_source_repo=Path(controlled_source_repo),
+        workspace_root=Path(workspace_root),
+        stage_name="extract_ad_hoc",
+    )
+
+
 def _run_configured_stage(
     *,
     config_path: Path,

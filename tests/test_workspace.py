@@ -8,7 +8,11 @@ import yaml
 
 from provenance.cli import main
 from provenance.scheduler import write_mock_lsf_metadata
-from provenance.stages import run_required_extraction, run_synthetic_simulation
+from provenance.stages import (
+    run_ad_hoc_extraction,
+    run_required_extraction,
+    run_synthetic_simulation,
+)
 from provenance.workspace import materialize_inputs, prepare_workspace
 
 
@@ -70,6 +74,17 @@ def _write_config(path: Path) -> None:
                         "command_kind": "controlled_source_script",
                         "inputs": ["sim-run-root/lists/dirC/sim-out.dat"],
                         "outputs": ["provenance/products/extracted/required.csv"],
+                    },
+                    {
+                        "name": "extract_ad_hoc",
+                        "command": (
+                            "scripts/ad_hoc_extract.py sim-run-root/lists/dirC/sim-out.dat "
+                            "provenance/products/extracted/ad_hoc.csv"
+                        ),
+                        "working_directory": "controlled_source_repo",
+                        "command_kind": "controlled_source_script",
+                        "inputs": ["sim-run-root/lists/dirC/sim-out.dat"],
+                        "outputs": ["provenance/products/extracted/ad_hoc.csv"],
                     },
                 ],
             }
@@ -424,6 +439,91 @@ def test_cli_extract_required_writes_stage_json(tmp_path: Path) -> None:
     assert (tmp_path / "runs/demo_009/provenance/products/extracted/required.csv").is_file()
 
 
+def test_ad_hoc_extraction_writes_derived_csv_outside_sim_run_root_and_stage_evidence(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "run.synthetic.yaml"
+    controlled_repo = _create_controlled_source_repo(tmp_path / "controlled-source-demo")
+    _write_config(config_path)
+    prepare_workspace(config_path=config_path, run_id="demo_010", workspace_root=tmp_path)
+    raw_output = tmp_path / "runs/demo_010/sim-run-root/lists/dirC/sim-out.dat"
+    raw_output.parent.mkdir(parents=True)
+    raw_output.write_text(
+        "logical_group,example,bytes,sha256_prefix\n"
+        "dirA,ex1.dat,11,ignoredaaaaa\n"
+        "dirC,ex1.dat,13,7fee469deaea\n"
+        "dirC,ex2.dat,17,ignoredbbbbb\n",
+        encoding="utf-8",
+    )
+
+    result = run_ad_hoc_extraction(
+        config_path=config_path,
+        run_id="demo_010",
+        workspace_root=tmp_path,
+        controlled_source_repo=controlled_repo,
+    )
+
+    ad_hoc_csv = tmp_path / "runs/demo_010/provenance/products/extracted/ad_hoc.csv"
+    assert ad_hoc_csv.is_file()
+    assert not (tmp_path / "runs/demo_010/sim-run-root/provenance").exists()
+    assert ad_hoc_csv.read_text(encoding="utf-8").splitlines() == [
+        "logical_group,input_count,total_bytes",
+        "dirA,1,11",
+        "dirC,2,30",
+    ]
+    assert result.status == "pass"
+    assert result.return_code == 0
+    assert result.working_directory == "controlled-source-demo"
+    assert result.stdout_log == "runs/demo_010/provenance/logs/extract_ad_hoc.stdout.log"
+    assert result.inputs[0].relative_path == "sim-run-root/lists/dirC/sim-out.dat"
+    assert result.inputs[0].role == "raw_output"
+    assert result.inputs[0].sha256 is not None
+    output = result.outputs[0]
+    assert output.relative_path == "provenance/products/extracted/ad_hoc.csv"
+    assert output.role == "extracted_product"
+    assert output.sha256 is not None and len(output.sha256) == 64
+
+
+def test_cli_extract_ad_hoc_writes_stage_json(tmp_path: Path) -> None:
+    config_path = tmp_path / "run.synthetic.yaml"
+    controlled_repo = _create_controlled_source_repo(tmp_path / "controlled-source-demo")
+    output_path = tmp_path / "runs/demo_011/provenance/logs/extract_ad_hoc.stage.json"
+    _write_config(config_path)
+    prepare_workspace(config_path=config_path, run_id="demo_011", workspace_root=tmp_path)
+    raw_output = tmp_path / "runs/demo_011/sim-run-root/lists/dirC/sim-out.dat"
+    raw_output.parent.mkdir(parents=True)
+    raw_output.write_text(
+        "logical_group,example,bytes,sha256_prefix\n"
+        "dirB,ex1.dat,19,ignoredaaaaa\n"
+        "dirC,ex1.dat,23,ignoredbbbbb\n",
+        encoding="utf-8",
+    )
+
+    assert (
+        main(
+            [
+                "extract-ad-hoc",
+                "--config",
+                str(config_path),
+                "--run-id",
+                "demo_011",
+                "--workspace-root",
+                str(tmp_path),
+                "--controlled-source-repo",
+                str(controlled_repo),
+                "--output",
+                str(output_path),
+            ]
+        )
+        == 0
+    )
+
+    evidence = json.loads(output_path.read_text(encoding="utf-8"))
+    assert evidence["name"] == "extract_ad_hoc"
+    assert evidence["outputs"][0]["relative_path"] == "provenance/products/extracted/ad_hoc.csv"
+    assert (tmp_path / "runs/demo_011/provenance/products/extracted/ad_hoc.csv").is_file()
+
+
 def _create_controlled_source_repo(path: Path) -> Path:
     (path / "fixtures/controlled_inputs").mkdir(parents=True)
     for group in ("dirA", "dirB", "dirC"):
@@ -485,6 +585,39 @@ def _create_controlled_source_repo(path: Path) -> Path:
         encoding="utf-8",
     )
     extractor.chmod(0o755)
+    ad_hoc_extractor = path / "scripts/ad_hoc_extract.py"
+    ad_hoc_extractor.write_text(
+        "#!/usr/bin/env python3\n"
+        "import csv\n"
+        "import sys\n"
+        "from collections import defaultdict\n"
+        "from pathlib import Path\n"
+        "input_path = Path(sys.argv[1])\n"
+        "output_path = Path(sys.argv[2])\n"
+        "totals = defaultdict(int)\n"
+        "counts = defaultdict(int)\n"
+        "with input_path.open(newline='', encoding='utf-8') as input_file:\n"
+        "    reader = csv.DictReader(input_file)\n"
+        "    for row in reader:\n"
+        "        totals[row['logical_group']] += int(row['bytes'])\n"
+        "        counts[row['logical_group']] += 1\n"
+        "output_path.parent.mkdir(parents=True, exist_ok=True)\n"
+        "with output_path.open('w', newline='', encoding='utf-8') as output_file:\n"
+        "    writer = csv.DictWriter(\n"
+        "        output_file, fieldnames=['logical_group', 'input_count', 'total_bytes']\n"
+        "    )\n"
+        "    writer.writeheader()\n"
+        "    for logical_group in sorted(counts):\n"
+        "        writer.writerow(\n"
+        "            {\n"
+        "                'logical_group': logical_group,\n"
+        "                'input_count': counts[logical_group],\n"
+        "                'total_bytes': totals[logical_group],\n"
+        "            }\n"
+        "        )\n",
+        encoding="utf-8",
+    )
+    ad_hoc_extractor.chmod(0o755)
     _git(path, "init")
     _git(path, "add", "fixtures", "procs", "scripts")
     _git(

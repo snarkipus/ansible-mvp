@@ -78,7 +78,12 @@ extract-required: ## Produce the required extracted CSV from raw simulation outp
 		--output "$(PROVENANCE_ROOT)/logs/extract_required.stage.json"
 
 extract-ad-hoc: ## Produce the ad hoc extracted CSV from raw simulation outputs.
-	@$(MAKE) _not-implemented TARGET=$@ BEAD=ansible-mvp-izo.5.3
+	uv run provenance extract-ad-hoc \
+		--config configs/run.synthetic.yaml \
+		--run-id "$(RUN_ID)" \
+		--workspace-root . \
+		--controlled-source-repo "$(CONTROLLED_SOURCE_REPO)" \
+		--output "$(PROVENANCE_ROOT)/logs/extract_ad_hoc.stage.json"
 
 build-reports: ## Generate summary.xlsx, chart.png, and briefing.pptx derived reports.
 	@$(MAKE) _not-implemented TARGET=$@ BEAD=ansible-mvp-izo.5.4
