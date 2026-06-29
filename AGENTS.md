@@ -3,7 +3,7 @@
 ## Current State
 - This repo currently contains concept/planning material, not the runnable MVP scaffold described in `README.md` and `docs/provenance_first_mvp_concept_spec.md`.
 - Do not assume `Makefile`, `ansible/`, `src/provenance/`, `tests/`, `requirements.txt`, or `controlled-source-demo` exist until you create or verify them.
-- Root `openspec/` exists but currently has empty `specs/` and no active changes under `openspec/changes/`.
+- Root `openspec/` exists; active changes under `openspec/changes/` are planning artifacts and must be checked before implementation.
 
 ## Intended MVP Shape
 - Build a local Ubuntu/WSL synthetic reference implementation, not production HPC deployment.
@@ -38,6 +38,13 @@
 - Repo-local OpenCode commands exist under `.opencode/commands/`: `/opsx-propose`, `/opsx-apply`, `/opsx-explore`, and `/opsx-archive`.
 - For substantial implementation work, prefer the local OpenSpec workflow: propose the change, implement tasks, then archive when complete.
 - If using OpenSpec CLI output, trust resolved paths from `openspec status --change <name> --json`; do not assume fixed change/artifact paths beyond what the CLI reports.
+
+## OpenSpec and Beads Sync
+- OpenSpec artifacts are the human-facing source of truth; beads are the agentic operating memory.
+- Before starting or closing implementation work, cross-check the relevant bead against the corresponding OpenSpec proposal/design/specs/tasks and keep them synchronized.
+- If implementation reveals a scope change, ambiguity, or mismatch, update or revise the OpenSpec artifact first, then update the bead metadata/dependencies to match.
+- Do not close a bead until its acceptance/success criteria have been reconciled against OpenSpec and any user-input findings have been surfaced.
+- Run `bd lint --json` after creating or bulk-updating beads so missing criteria do not drift from OpenSpec.
 
 <!-- BEGIN BEADS INTEGRATION v:1 profile:full hash:0a1bbe8a -->
 
