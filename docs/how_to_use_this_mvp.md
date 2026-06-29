@@ -198,3 +198,26 @@ For OpenSpec reconciliation and bead hygiene, run:
 openspec validate scaffold-runnable-provenance-mvp --type change --strict --json
 bd lint --json
 ```
+
+## Final MVP Verification and Deferred Limitations
+
+Final verification for the MVP scaffold was run on 2026-06-29 with:
+
+```bash
+make bootstrap-controlled-source
+make check
+ansible-playbook ansible/playbooks/run_synthetic_workflow.yml \
+  -i ansible/inventory/localhost.ini \
+  -e run_id=final_verification_001 \
+  -e controlled_source_repo=../controlled-source-demo \
+  -e controlled_source_ref=controlled-source-demo-v0.1.0
+openspec validate scaffold-runnable-provenance-mvp --type change --strict --json
+bd lint --json
+```
+
+The bootstrap, quality gate, and clean synthetic workflow completed successfully.
+Generated verification outputs are intentionally ignored under `runs/`.
+
+Known deferred limitations are tracked as follow-up beads rather than implemented in
+this MVP: production real-LSF integration, long-term artifact archival/formal
+schema validation, and production-scale hash policy for large outputs.

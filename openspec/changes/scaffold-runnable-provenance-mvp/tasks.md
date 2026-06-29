@@ -55,4 +55,4 @@
 - [x] 7.3 Add a quality gate target that runs `uv run ruff format --check`, `uv run ruff check`, `uv run mypy`, and `uv run pytest` in that order.
 - [x] 7.4 Add `docs/how_to_use_this_mvp.md` for junior engineers, covering prerequisites, setup, bootstrap, run commands, expected outputs, manifest inspection, extension points, controlled-script rules, validation/report additions, troubleshooting, and what not to change.
 - [x] 7.5 Update README quickstart notes if implementation details differ from the existing documented command shape, and link to the handoff guide.
-- [ ] 7.6 Run the relevant test suite, quality gate, and a local clean synthetic workflow command, then record any known limitations or deferred follow-up work.
+- [x] 7.6 Run the relevant test suite, quality gate, and a local clean synthetic workflow command, then record any known limitations or deferred follow-up work.
