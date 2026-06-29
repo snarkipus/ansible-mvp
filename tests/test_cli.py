@@ -87,6 +87,56 @@ def test_cli_inventory_pre_writes_input_and_script_inventories(tmp_path: Path, c
     assert scripts[0]["materialization"]["source_path"] == "procs/run-script.sh"
 
 
+def test_cli_inventory_post_writes_raw_output_and_derived_product_inventories(
+    tmp_path: Path, capsys
+) -> None:  # type: ignore[no-untyped-def]
+    run_root = tmp_path / "runs" / "demo_001"
+    sim_root = run_root / "sim-run-root"
+    provenance_root = run_root / "provenance"
+    inventory_root = provenance_root / "inventories"
+    (sim_root / "lists" / "dirC").mkdir(parents=True)
+    (provenance_root / "products" / "extracted").mkdir(parents=True)
+    (provenance_root / "products" / "reports").mkdir(parents=True)
+    (sim_root / "lists" / "dirC" / "sim-out.dat").write_text("raw\n", encoding="utf-8")
+    (provenance_root / "products" / "extracted" / "required.csv").write_text(
+        "logical_group,example,bytes,sha256_prefix\ndirC,ex1.dat,4,aaaa\n",
+        encoding="utf-8",
+    )
+    (provenance_root / "products" / "reports" / "summary.xlsx").write_text(
+        "report\n", encoding="utf-8"
+    )
+
+    assert main(["inventory-post", "--run-id", "demo_001", "--workspace-root", str(tmp_path)]) == 0
+
+    summary = json.loads(capsys.readouterr().out)
+    raw_outputs = json.loads(
+        (inventory_root / "post_run_raw_outputs.json").read_text(encoding="utf-8")
+    )
+    products = json.loads(
+        (inventory_root / "post_run_derived_products.json").read_text(encoding="utf-8")
+    )
+    assert summary["raw_output_count"] == 1
+    assert summary["derived_product_count"] == 2
+    assert raw_outputs[0]["relative_path"] == "lists/dirC/sim-out.dat"
+    assert raw_outputs[0]["workflow_relative_path"] == "sim-run-root/lists/dirC/sim-out.dat"
+    assert (
+        raw_outputs[0]["run_relative_path"] == "runs/demo_001/sim-run-root/lists/dirC/sim-out.dat"
+    )
+    assert raw_outputs[0]["sim_area"] == "lists"
+    assert raw_outputs[0]["logical_group"] == "dirC"
+    assert raw_outputs[0]["role"] == "raw_output"
+    assert raw_outputs[0]["hash_status"] == "hashed"
+    assert len(raw_outputs[0]["sha256"]) == 64
+    by_path = {product["workflow_relative_path"]: product for product in products}
+    assert by_path["provenance/products/extracted/required.csv"]["role"] == "extracted_product"
+    assert (
+        by_path["provenance/products/extracted/required.csv"]["producing_stage"]
+        == "extract_required"
+    )
+    assert by_path["provenance/products/reports/summary.xlsx"]["role"] == "report_product"
+    assert by_path["provenance/products/reports/summary.xlsx"]["producing_stage"] == "build_reports"
+
+
 def test_cli_validate_csv_returns_nonzero_for_failed_shape(tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
     csv_path = tmp_path / "required.csv"
     csv_path.write_text("case,value\na,1\n", encoding="utf-8")

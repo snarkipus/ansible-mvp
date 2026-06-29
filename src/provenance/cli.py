@@ -25,7 +25,7 @@ from provenance.git_state import (
     tracked_file_state,
 )
 from provenance.hashing import hash_artifact
-from provenance.inventory import inventory_files, with_sha256
+from provenance.inventory import InventoryRecord, inventory_files, with_sha256
 from provenance.manifest import (
     ManifestAssemblyInput,
     assemble_manifest,
@@ -166,6 +166,15 @@ def _build_parser() -> argparse.ArgumentParser:
     inventory_pre.add_argument("--inputs-output", type=Path)
     inventory_pre.add_argument("--scripts-output", type=Path)
     inventory_pre.set_defaults(func=_cmd_inventory_pre)
+
+    inventory_post = subparsers.add_parser(
+        "inventory-post", help="write post-run raw-output and derived-product inventories"
+    )
+    inventory_post.add_argument("--run-id", required=True)
+    inventory_post.add_argument("--workspace-root", type=Path, default=Path("."))
+    inventory_post.add_argument("--raw-output", type=Path)
+    inventory_post.add_argument("--products-output", type=Path)
+    inventory_post.set_defaults(func=_cmd_inventory_post)
 
     validate_csv = subparsers.add_parser("validate-csv", help="validate CSV shape")
     validate_csv.add_argument("path", type=Path)
@@ -428,6 +437,34 @@ def _cmd_inventory_pre(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_inventory_post(args: argparse.Namespace) -> int:
+    root = args.workspace_root.expanduser().resolve()
+    run_root = root / "runs" / args.run_id
+    sim_root = run_root / "sim-run-root"
+    provenance_root = run_root / "provenance"
+    inventory_root = provenance_root / "inventories"
+    raw_output = args.raw_output or inventory_root / "post_run_raw_outputs.json"
+    products_output = args.products_output or inventory_root / "post_run_derived_products.json"
+
+    raw_outputs = _post_run_raw_output_records(root=root, run_root=run_root, sim_root=sim_root)
+    products = _post_run_derived_product_records(
+        root=root, run_root=run_root, provenance_root=provenance_root
+    )
+    _write_json(raw_outputs, raw_output)
+    _write_json(products, products_output)
+    _write_json(
+        {
+            "status": "pass",
+            "raw_outputs_inventory": raw_output.as_posix(),
+            "derived_products_inventory": products_output.as_posix(),
+            "raw_output_count": len(raw_outputs),
+            "derived_product_count": len(products),
+        },
+        None,
+    )
+    return 0
+
+
 def _pre_run_inventory_records(
     *, root: Path, sim_root: Path, area: str, materialization_evidence: Path
 ) -> list[dict[str, Any]]:
@@ -447,6 +484,55 @@ def _pre_run_inventory_records(
         entry["materialization"] = materialized_by_destination.get(run_relative_path)
         payload.append(entry)
     return payload
+
+
+def _post_run_raw_output_records(
+    *, root: Path, run_root: Path, sim_root: Path
+) -> list[dict[str, Any]]:
+    payload: list[dict[str, Any]] = []
+    for record in inventory_files(sim_root):
+        if record.role != "raw_output":
+            continue
+        hashed = with_sha256(record, hash_artifact(sim_root / record.relative_path).sha256 or "")
+        absolute_path = sim_root / hashed.relative_path
+        entry: dict[str, Any] = dict(hashed.to_dict())
+        entry["workflow_relative_path"] = absolute_path.relative_to(run_root).as_posix()
+        entry["run_relative_path"] = absolute_path.relative_to(root).as_posix()
+        entry["hash_status"] = "hashed"
+        payload.append(entry)
+    return payload
+
+
+def _post_run_derived_product_records(
+    *, root: Path, run_root: Path, provenance_root: Path
+) -> list[dict[str, Any]]:
+    payload: list[dict[str, Any]] = []
+    for record in inventory_files(provenance_root):
+        if record.area_type != "product":
+            continue
+        hashed = with_sha256(
+            record, hash_artifact(provenance_root / record.relative_path).sha256 or ""
+        )
+        absolute_path = provenance_root / hashed.relative_path
+        entry: dict[str, Any] = dict(hashed.to_dict())
+        entry["workflow_relative_path"] = absolute_path.relative_to(run_root).as_posix()
+        entry["run_relative_path"] = absolute_path.relative_to(root).as_posix()
+        entry["hash_status"] = "hashed"
+        entry["producing_stage"] = _producing_stage_for_product(hashed)
+        payload.append(entry)
+    return payload
+
+
+def _producing_stage_for_product(record: InventoryRecord) -> str | None:
+    if record.product_area == "reports":
+        return "build_reports"
+    if record.product_area == "extracted":
+        name = Path(record.relative_path).name
+        if name == "required.csv":
+            return "extract_required"
+        if name == "ad_hoc.csv":
+            return "extract_ad_hoc"
+    return None
 
 
 def _materialized_artifacts_by_destination(path: Path) -> dict[str, dict[str, Any]]:

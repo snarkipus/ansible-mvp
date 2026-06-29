@@ -100,7 +100,11 @@ inventory-pre: ## Inventory pre-run controlled inputs and runtime scripts.
 		--scripts-output "$(PROVENANCE_ROOT)/inventories/pre_run_controlled_scripts.json"
 
 inventory-post: ## Inventory post-run raw outputs and derived products.
-	@$(MAKE) _not-implemented TARGET=$@ BEAD=ansible-mvp-izo.6.2
+	uv run provenance inventory-post \
+		--run-id "$(RUN_ID)" \
+		--workspace-root . \
+		--raw-output "$(PROVENANCE_ROOT)/inventories/post_run_raw_outputs.json" \
+		--products-output "$(PROVENANCE_ROOT)/inventories/post_run_derived_products.json"
 
 validate: ## Validate extracted products and run manifest smoke checks.
 	@$(MAKE) _not-implemented TARGET=$@ BEAD=ansible-mvp-izo.6.3
