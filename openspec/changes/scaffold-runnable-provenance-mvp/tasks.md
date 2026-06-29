@@ -10,7 +10,7 @@
 
 - [x] 2.1 Implement `make bootstrap-controlled-source` to create or verify a sibling `../controlled-source-demo` Git repository.
 - [x] 2.2 Populate the controlled source demo with tracked synthetic fixture inputs for `dirA`, `dirB`, and `dirC`.
-- [ ] 2.3 Add tracked controlled scripts to the demo repo: `procs/run-script.sh`, `scripts/synthetic_sim_engine.sh`, `scripts/extract_required.pl`, and `scripts/ad_hoc_extract.py`.
+- [x] 2.3 Add tracked controlled scripts to the demo repo: `procs/run-script.sh`, `scripts/synthetic_sim_engine.sh`, `scripts/extract_required.pl`, and `scripts/ad_hoc_extract.py`.
 - [ ] 2.4 Commit the controlled source demo contents and tag the expected reference `controlled-source-demo-v0.1.0`.
 - [ ] 2.5 Make bootstrap fail clearly when an existing `../controlled-source-demo` is incompatible, dirty, missing expected tracked files, or missing the expected tag.
 

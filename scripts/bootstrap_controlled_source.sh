@@ -5,6 +5,8 @@ controlled_source_repo=${1:-../controlled-source-demo}
 script_dir=$(cd "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 project_root=$(cd "$script_dir/.." && pwd -P)
 fixture_source_dir="$project_root/templates/controlled-source-demo/fixtures/controlled_inputs"
+proc_source_dir="$project_root/templates/controlled-source-demo/procs"
+script_source_dir="$project_root/templates/controlled-source-demo/scripts"
 
 repo_display=$controlled_source_repo
 repo_parent=$(dirname -- "$controlled_source_repo")
@@ -35,6 +37,14 @@ if [[ ! -d "$fixture_source_dir" ]]; then
   fail "controlled fixture template directory is missing: $fixture_source_dir"
 fi
 
+if [[ ! -d "$proc_source_dir" ]]; then
+  fail "controlled proc template directory is missing: $proc_source_dir"
+fi
+
+if [[ ! -d "$script_source_dir" ]]; then
+  fail "controlled script template directory is missing: $script_source_dir"
+fi
+
 if [[ ! -d "$controlled_source_repo" ]]; then
   mkdir -p -- "$repo_parent"
   (cd "$repo_parent" && mkdir -- "$repo_name")
@@ -63,5 +73,17 @@ fi
 mkdir -p -- "$controlled_source_repo/fixtures"
 cp -R -- "$fixture_source_dir" "$controlled_source_repo/fixtures/"
 
+mkdir -p -- "$controlled_source_repo/procs" "$controlled_source_repo/scripts"
+cp -- "$proc_source_dir/run-script.sh" "$controlled_source_repo/procs/run-script.sh"
+cp -- "$script_source_dir/synthetic_sim_engine.sh" "$controlled_source_repo/scripts/synthetic_sim_engine.sh"
+cp -- "$script_source_dir/extract_required.pl" "$controlled_source_repo/scripts/extract_required.pl"
+cp -- "$script_source_dir/ad_hoc_extract.py" "$controlled_source_repo/scripts/ad_hoc_extract.py"
+chmod 0755 \
+  "$controlled_source_repo/procs/run-script.sh" \
+  "$controlled_source_repo/scripts/synthetic_sim_engine.sh" \
+  "$controlled_source_repo/scripts/extract_required.pl" \
+  "$controlled_source_repo/scripts/ad_hoc_extract.py"
+
 printf 'Synced controlled fixture inputs into %s/fixtures/controlled_inputs\n' "$repo_display"
+printf 'Synced controlled scripts into %s/{procs,scripts}\n' "$repo_display"
 printf 'Fixture files are ready for the controlled source commit/tag step owned by ansible-mvp-izo.2.4.\n'
