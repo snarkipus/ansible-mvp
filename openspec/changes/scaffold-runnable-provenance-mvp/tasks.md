@@ -20,7 +20,7 @@
 - [x] 3.2 Add `src/provenance/inventory.py` to inventory files with relative path, size, mtime, simulation/product area, logical group, and role metadata.
 - [x] 3.3 Add `src/provenance/hashing.py` to compute SHA-256 hashes and represent hash status for MVP artifacts.
 - [x] 3.4 Add `src/provenance/validation.py` to perform simple file existence, non-empty, row-count, column-count, and header checks for CSV products.
-- [ ] 3.5 Add `src/provenance/manifest.py` to assemble the run manifest from config, Git state, inventories, stages, logs, scheduler metadata, validations, products, and hash policy.
+- [x] 3.5 Add `src/provenance/manifest.py` to assemble the run manifest from config, Git state, inventories, stages, logs, scheduler metadata, validations, products, and hash policy.
 - [ ] 3.6 Add `src/provenance/cli.py` exposing focused commands for Git state, inventory, validation, manifest assembly, and manifest smoke validation.
 
 ## 4. Run Orchestration

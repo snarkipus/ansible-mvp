@@ -1,0 +1,156 @@
+from pathlib import Path
+
+import yaml
+
+from provenance.hashing import HashPolicy
+from provenance.inventory import InventoryRecord
+from provenance.manifest import (
+    REQUIRED_TOP_LEVEL_SECTIONS,
+    ManifestAssemblyInput,
+    assemble_manifest,
+    missing_required_sections,
+    write_manifest,
+)
+from provenance.validation import CSVValidationEvidence, ValidationCheck, ValidationStatus
+
+
+def test_assemble_manifest_connects_core_provenance_sections() -> None:
+    input_record = InventoryRecord(
+        relative_path="input/dirC/ex1.dat",
+        size_bytes=10,
+        mtime_ns=1,
+        mtime_utc="2026-06-29T00:00:00Z",
+        area_type="simulation",
+        sim_area="input",
+        product_area=None,
+        logical_group="dirC",
+        role="input",
+        sha256="abc123",
+    )
+    raw_record = InventoryRecord(
+        relative_path="lists/dirC/sim-out.dat",
+        size_bytes=20,
+        mtime_ns=2,
+        mtime_utc="2026-06-29T00:00:01Z",
+        area_type="simulation",
+        sim_area="lists",
+        product_area=None,
+        logical_group="dirC",
+        role="raw_output",
+        sha256="def456",
+    )
+    validation = CSVValidationEvidence(
+        path="products/extracted/required.csv",
+        status=ValidationStatus.PASS,
+        checks=(
+            ValidationCheck(
+                name="minimum_data_row_count",
+                status=ValidationStatus.PASS,
+                expected=">= 1",
+                actual=2,
+            ),
+        ),
+        size_bytes=30,
+        total_rows=3,
+        data_rows=2,
+        header=("case", "value"),
+        column_counts=(2, 2, 2),
+    )
+
+    manifest = assemble_manifest(
+        ManifestAssemblyInput(
+            run={"run_id": "demo_001", "root": Path("runs/demo_001")},
+            repositories=(
+                {
+                    "name": "controlled-source-demo",
+                    "path": Path("../controlled-source-demo"),
+                    "requested_ref": "controlled-source-demo-v0.1.0",
+                    "resolved_commit": "0" * 40,
+                    "describe": "controlled-source-demo-v0.1.0",
+                    "worktree_status": "clean",
+                    "tracked_script_paths": ["procs/run-script.sh"],
+                },
+            ),
+            simulation_layout={
+                "sim_run_root": "runs/demo_001/sim-run-root",
+                "provenance_root": "runs/demo_001/provenance",
+            },
+            controlled_source_gate={"status": "pass", "checked_scripts": ["procs/run-script.sh"]},
+            scheduler={"mode": "mock_lsf", "metadata_path": "scheduler/submission.yaml"},
+            inputs=(
+                {
+                    **input_record.to_dict(),
+                    "source_path": "fixtures/input/dirC/ex1.dat",
+                    "run_path": "sim-run-root/input/dirC/ex1.dat",
+                    "materialization_mode": "copy_from_controlled_source",
+                },
+            ),
+            runtime_scripts=(
+                {
+                    "source_path": "procs/run-script.sh",
+                    "run_path": "sim-run-root/procs/run-script.sh",
+                    "materialization_mode": "copy_from_controlled_source",
+                    "sha256": "789abc",
+                },
+            ),
+            stages=(
+                {
+                    "name": "simulation",
+                    "command": "procs/run-script.sh",
+                    "working_directory": "runs/demo_001/sim-run-root",
+                    "status": "pass",
+                    "return_code": 0,
+                    "logs": ["logs/simulation.stdout.log"],
+                    "controlled_scripts": ["procs/run-script.sh"],
+                    "inputs": ["input/dirC/ex1.dat"],
+                    "outputs": ["lists/dirC/sim-out.dat"],
+                },
+            ),
+            raw_simulation_outputs=(raw_record,),
+            derived_products=(
+                {
+                    "relative_path": "products/extracted/required.csv",
+                    "product_area": "extracted",
+                    "role": "extracted_product",
+                    "producing_stage": "extract_required",
+                    "sha256": "fedcba",
+                },
+            ),
+            validations=(validation,),
+            logs=({"stage": "simulation", "path": "logs/simulation.stdout.log"},),
+            hash_policy=HashPolicy(),
+            notes=("Synthetic MVP manifest assembled from helper records.",),
+            config={"run_config": "configs/run.synthetic.yaml"},
+        )
+    )
+
+    assert missing_required_sections(manifest) == ()
+    assert tuple(manifest)[: len(REQUIRED_TOP_LEVEL_SECTIONS)] == REQUIRED_TOP_LEVEL_SECTIONS
+    assert manifest["inputs"][0]["logical_group"] == "dirC"
+    assert manifest["inputs"][0]["materialization_mode"] == "copy_from_controlled_source"
+    assert manifest["runtime_scripts"][0]["run_path"] == "sim-run-root/procs/run-script.sh"
+    assert manifest["stages"][0]["outputs"] == ["lists/dirC/sim-out.dat"]
+    assert manifest["raw_simulation_outputs"][0]["sim_area"] == "lists"
+    assert manifest["derived_products"][0]["product_area"] == "extracted"
+    assert manifest["validations"][0]["status"] == "pass"
+    assert manifest["hash_policy"]["algorithm"] == "sha256"
+    assert manifest["config"]["run_config"] == "configs/run.synthetic.yaml"
+
+
+def test_write_manifest_creates_yaml_file(tmp_path: Path) -> None:
+    manifest = assemble_manifest(
+        ManifestAssemblyInput(
+            run={"run_id": "demo_001"},
+            repositories=(),
+            simulation_layout={"sim_run_root": "runs/demo_001/sim-run-root"},
+            controlled_source_gate={"status": "pass"},
+            scheduler={"mode": "mock_lsf"},
+        )
+    )
+
+    destination = write_manifest(manifest, tmp_path / "provenance" / "manifest.yaml")
+
+    assert destination.exists()
+    loaded = yaml.safe_load(destination.read_text(encoding="utf-8"))
+    assert loaded["manifest_version"] == "0.1"
+    assert loaded["run"]["run_id"] == "demo_001"
