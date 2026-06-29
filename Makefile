@@ -18,7 +18,7 @@ help: ## Show documented Make targets.
 	@awk 'BEGIN {FS = ":.*## "; printf "Usage: make <target> [RUN_ID=%s]\n\nTargets:\n", "$(RUN_ID)"} /^[a-zA-Z0-9_-]+:.*## / {printf "  %-28s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 bootstrap-controlled-source: ## Bootstrap or verify the sibling controlled source demo repository.
-	@$(MAKE) _not-implemented TARGET=$@ BEAD=ansible-mvp-izo.2.1
+	./scripts/bootstrap_controlled_source.sh "$(CONTROLLED_SOURCE_REPO)"
 
 preflight: ## Run the Git-controlled source entrance gate before workflow stages.
 	@$(MAKE) _not-implemented TARGET=$@ BEAD=ansible-mvp-izo.4.3
