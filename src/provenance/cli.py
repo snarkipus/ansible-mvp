@@ -32,7 +32,7 @@ from provenance.manifest import (
 )
 from provenance.preflight import PreflightError, run_preflight
 from provenance.validation import CSVShapeExpectation, validate_csv_product
-from provenance.workspace import prepare_workspace
+from provenance.workspace import materialize_inputs, materialize_runtime_scripts, prepare_workspace
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -84,6 +84,18 @@ def _build_parser() -> argparse.ArgumentParser:
     workspace.add_argument("--workspace-root", type=Path, default=Path("."))
     workspace.add_argument("--output", type=Path, help="optional JSON output path")
     workspace.set_defaults(func=_cmd_prepare_workspace)
+
+    materialize_inputs_parser = subparsers.add_parser(
+        "materialize-inputs", help="copy controlled inputs into the run workspace"
+    )
+    _add_materialization_arguments(materialize_inputs_parser)
+    materialize_inputs_parser.set_defaults(func=_cmd_materialize_inputs)
+
+    materialize_procs = subparsers.add_parser(
+        "materialize-procs", help="copy controlled runtime scripts into the run workspace"
+    )
+    _add_materialization_arguments(materialize_procs)
+    materialize_procs.set_defaults(func=_cmd_materialize_procs)
 
     inventory = subparsers.add_parser("inventory", help="inventory files under a root")
     inventory.add_argument("root", type=Path)
@@ -164,6 +176,30 @@ def _cmd_prepare_workspace(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_materialize_inputs(args: argparse.Namespace) -> int:
+    result = materialize_inputs(
+        config_path=args.config,
+        run_id=args.run_id,
+        controlled_source_repo=args.controlled_source_repo,
+        controlled_source_ref=args.controlled_source_ref,
+        workspace_root=args.workspace_root,
+    )
+    _write_json(result.to_dict(), args.output)
+    return 0
+
+
+def _cmd_materialize_procs(args: argparse.Namespace) -> int:
+    result = materialize_runtime_scripts(
+        config_path=args.config,
+        run_id=args.run_id,
+        controlled_source_repo=args.controlled_source_repo,
+        controlled_source_ref=args.controlled_source_ref,
+        workspace_root=args.workspace_root,
+    )
+    _write_json(result.to_dict(), args.output)
+    return 0
+
+
 def _cmd_inventory(args: argparse.Namespace) -> int:
     records = inventory_files(args.root)
     if args.with_hashes:
@@ -173,6 +209,15 @@ def _cmd_inventory(args: argparse.Namespace) -> int:
         )
     _write_json([record.to_dict() for record in records], args.output)
     return 0
+
+
+def _add_materialization_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--config", type=Path, default=Path("configs/run.synthetic.yaml"))
+    parser.add_argument("--run-id", required=True)
+    parser.add_argument("--workspace-root", type=Path, default=Path("."))
+    parser.add_argument("--controlled-source-repo", type=Path, required=True)
+    parser.add_argument("--controlled-source-ref", required=True)
+    parser.add_argument("--output", type=Path, help="optional JSON output path")
 
 
 def _cmd_validate_csv(args: argparse.Namespace) -> int:

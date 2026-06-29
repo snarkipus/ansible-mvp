@@ -37,10 +37,22 @@ prepare-workspace: ## Prepare runs/$(RUN_ID)/sim-run-root and provenance sidecar
 		--workspace-root .
 
 materialize-inputs: ## Copy controlled fixture inputs into the run workspace.
-	@$(MAKE) _not-implemented TARGET=$@ BEAD=ansible-mvp-izo.4.5
+	uv run provenance materialize-inputs \
+		--config configs/run.synthetic.yaml \
+		--run-id "$(RUN_ID)" \
+		--workspace-root . \
+		--controlled-source-repo "$(CONTROLLED_SOURCE_REPO)" \
+		--controlled-source-ref "$(CONTROLLED_SOURCE_REF)" \
+		--output "$(PROVENANCE_ROOT)/inventories/materialized_inputs.json"
 
 materialize-procs: ## Materialize sim-run-root/procs/run-script.sh from controlled source.
-	@$(MAKE) _not-implemented TARGET=$@ BEAD=ansible-mvp-izo.4.5
+	uv run provenance materialize-procs \
+		--config configs/run.synthetic.yaml \
+		--run-id "$(RUN_ID)" \
+		--workspace-root . \
+		--controlled-source-repo "$(CONTROLLED_SOURCE_REPO)" \
+		--controlled-source-ref "$(CONTROLLED_SOURCE_REF)" \
+		--output "$(PROVENANCE_ROOT)/inventories/materialized_runtime_scripts.json"
 
 submit-mock-lsf: ## Write mock LSF scheduler metadata without requiring real LSF tools.
 	@$(MAKE) _not-implemented TARGET=$@ BEAD=ansible-mvp-izo.4.6
