@@ -10,7 +10,7 @@ This document is intentionally detailed enough for future agents and maintainers
 
 The repository began with concept documentation and OpenCode/OpenSpec tooling, not an executable scaffold. The implemented MVP now demonstrates a provenance wrapper around an existing simulation-style workflow rather than replacing that workflow with a new orchestrator or data platform.
 
-The synthetic implementation runs locally on Ubuntu/WSL and models two Git repositories: this provenance wrapper repo and a sibling `../controlled-source-demo` repo containing controlled synthetic scripts and fixture inputs. Generated run artifacts remain outside Git under `runs/{run_id}/`.
+The synthetic implementation runs locally on Ubuntu/WSL and models two Git repositories: this provenance wrapper repo and a sibling `../controlled-source-demo` repo containing controlled synthetic scripts and fixture inputs. On Windows hosts, operators should run commands inside Ubuntu/WSL rather than native PowerShell or CMD because the MVP assumes Linux tooling, Unix-style paths, `bash`, `make`, and Ansible. Generated run artifacts remain outside Git under `runs/{run_id}/`.
 
 Python helper code is provenance-critical: it decides what is controlled, what was run, what was produced, what passed validation, and what the manifest says. The scaffold therefore uses explicit Python project tooling from the start: `uv` for environment/dependency execution, `ruff` for linting/formatting, `mypy` for static type checking, and `pytest` for tests.
 
@@ -220,6 +220,8 @@ Important stage outputs include:
 - `provenance/inventories/pre_run_inputs.json`, `pre_run_controlled_scripts.json`, `post_run_raw_outputs.json`, and `post_run_derived_products.json` from inventories.
 - `provenance/validations/required_extract.json` and `manifest_smoke.json` from validation.
 - `provenance/manifest.yaml` from manifest assembly.
+
+Each attempted execution should use a fresh `run_id`. Failed or partial runs are intentionally inspectable through the existing `runs/{run_id}/` tree and provenance logs, but the MVP does not define safe resume behavior, retry attempt history, or manifest merge semantics. After correcting a failure, operators should start a new run with a new `run_id` unless future resume semantics are explicitly implemented.
 
 ## Preflight Hard-Gate Semantics
 
@@ -433,6 +435,7 @@ bd lint --json
 The MVP intentionally defers production concerns until the provenance spine is proven:
 
 - Real LSF integration, including `bsub`, `bjobs`, `bhist`, `bacct`, polling, resource usage, and inside-job metadata.
+- Failed-run resume semantics, including persisted attempt history, safe stage retry behavior, and manifest handling for partial or retried runs.
 - Production simulation layout confirmation beyond the simplified canonical shape.
 - Actual production repository boundaries and whether production runs require immutable commit hashes rather than tags.
 - Production input materialization policy, including symlinks, referenced-only inputs, external large datasets, and allowed staging behavior.

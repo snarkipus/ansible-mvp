@@ -15,6 +15,12 @@ output is connected to `runs/{run_id}/provenance/manifest.yaml`.
 - Perl
 - `uv` for Python tool execution
 
+On Windows workstations, run all MVP commands inside Ubuntu/WSL, not directly in
+native PowerShell or CMD. The workflow assumes `make`, `bash`, Unix-style paths,
+and Ansible are available in the Linux environment. A Windows user can either
+open the WSL shell first or prefix commands with `wsl`, for example
+`wsl make bootstrap-controlled-source`.
+
 The MVP uses two sibling repositories:
 
 ```text
@@ -25,7 +31,8 @@ workspace/
 
 ## Setup and Bootstrap
 
-From this repository root, create or verify the sibling controlled-source demo:
+From this repository root inside Ubuntu/WSL, create or verify the sibling
+controlled-source demo:
 
 ```bash
 make bootstrap-controlled-source
@@ -49,6 +56,12 @@ ansible-playbook ansible/playbooks/run_synthetic_workflow.yml \
 
 For focused debugging, individual Make targets can also be run, but keep the same
 configuration values and do not bypass preflight.
+
+Choose a fresh `run_id` for each new execution. If a stage fails, the partial
+`runs/{run_id}/` tree and `provenance/logs/` evidence are useful for inspection,
+but the MVP does not guarantee safe resume or attempt-history semantics. After
+fixing the cause of the failure, start again with a new `run_id` unless resume
+behavior is added in a future change.
 
 ## Expected Outputs
 
@@ -167,6 +180,9 @@ When adding a new stage or artifact:
   controlled repository-relative script path.
 - **Missing outputs:** inspect `runs/{run_id}/provenance/logs/` and the related
   `stages` entry in `manifest.yaml`.
+- **Partial or failed run:** inspect the existing `runs/{run_id}/` evidence, then
+  rerun with a new `run_id` after fixing the problem. Do not assume the MVP can
+  safely resume a partially completed run.
 - **CSV validation failure:** compare the generated CSV with
   `configs/expected_shape.required_extract.yaml`.
 - **Real LSF tools are absent:** this is expected for the MVP; mock scheduler mode
@@ -219,5 +235,6 @@ The bootstrap, quality gate, and clean synthetic workflow completed successfully
 Generated verification outputs are intentionally ignored under `runs/`.
 
 Known deferred limitations are tracked as follow-up beads rather than implemented in
-this MVP: production real-LSF integration, long-term artifact archival/formal
-schema validation, and production-scale hash policy for large outputs.
+this MVP: production real-LSF integration, safe failed-run resume semantics,
+long-term artifact archival/formal schema validation, and production-scale hash
+policy for large outputs.

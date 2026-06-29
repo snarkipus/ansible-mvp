@@ -12,7 +12,7 @@ This repository demonstrates a **provenance-first MVP** for an engineering data 
 - capturing inputs, scripts, execution metadata, logs, outputs, and derived products,
 - generating a human-readable `manifest.yaml`.
 
-The MVP is intended to run locally on Ubuntu/WSL and serve as a template for later adaptation to RHEL HPC login nodes and LSF-managed compute execution.
+The MVP is intended to run locally on Ubuntu/WSL and serve as a template for later adaptation to RHEL HPC login nodes and LSF-managed compute execution. On Windows hosts, run the commands from inside Ubuntu/WSL, not from native PowerShell or CMD, so `make`, `bash`, Unix-style paths, and Ansible resolve consistently.
 
 ## Pre-MVP Baseline Workflow
 
@@ -133,6 +133,8 @@ Python dependencies are managed through `uv` from `pyproject.toml`/`uv.lock`. Th
 
 For a step-by-step operator handoff, troubleshooting notes, and safe extension rules, see [`docs/how_to_use_this_mvp.md`](docs/how_to_use_this_mvp.md).
 
+Run these commands from a Linux shell, such as Ubuntu/WSL on Windows. If you are starting from Windows, either open the WSL distribution first or invoke the command through `wsl`; do not run the workflow directly in PowerShell or CMD.
+
 Bootstrap the synthetic controlled source repository:
 
 ```bash
@@ -167,6 +169,8 @@ runs/demo_001/provenance/validations/manifest_smoke.json
 runs/demo_001/sim-run-root/lists/
 runs/demo_001/sim-run-root/files/
 ```
+
+If a run fails partway through, keep `runs/{run_id}/` for inspection and debugging. The MVP does not define safe resume semantics or attempt history for partial runs, so after fixing the cause, start a fresh run with a new `run_id` unless future resume behavior is explicitly implemented.
 
 Run the local quality gate before closing code changes:
 
@@ -295,6 +299,7 @@ A successful MVP run should satisfy:
 ## Known Limitations and Deferred Production Decisions
 
 - Real LSF integration is deferred; no `bsub`, `bjobs`, `bhist`, or `bacct` commands are required by this MVP.
+- Failed or partial runs are inspectable but not safely resumable in the MVP; use a new `run_id` after fixing the failure unless future resume semantics are implemented.
 - The production hash policy for very large outputs remains deferred; the local synthetic demo hashes small controlled inputs and derived products with SHA-256.
 - Manifest validation is currently lightweight: required sections/key values are smoke-checked rather than validated against a formal schema.
 - Long-term artifact archival, cataloging, promotion, and release workflows are intentionally outside this scaffold.
