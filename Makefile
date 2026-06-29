@@ -86,7 +86,10 @@ extract-ad-hoc: ## Produce the ad hoc extracted CSV from raw simulation outputs.
 		--output "$(PROVENANCE_ROOT)/logs/extract_ad_hoc.stage.json"
 
 build-reports: ## Generate summary.xlsx, chart.png, and briefing.pptx derived reports.
-	@$(MAKE) _not-implemented TARGET=$@ BEAD=ansible-mvp-izo.5.4
+	uv run provenance build-reports \
+		--run-id "$(RUN_ID)" \
+		--workspace-root . \
+		--output "$(PROVENANCE_ROOT)/inventories/report_products.json"
 
 inventory-pre: ## Inventory pre-run controlled inputs and runtime scripts.
 	@$(MAKE) _not-implemented TARGET=$@ BEAD=ansible-mvp-izo.6.1

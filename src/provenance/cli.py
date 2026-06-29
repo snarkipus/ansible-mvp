@@ -31,6 +31,7 @@ from provenance.manifest import (
     write_manifest,
 )
 from provenance.preflight import PreflightError, run_preflight
+from provenance.reports import build_report_product_evidence
 from provenance.scheduler import write_mock_lsf_metadata
 from provenance.stages import (
     run_ad_hoc_extraction,
@@ -139,6 +140,14 @@ def _build_parser() -> argparse.ArgumentParser:
     extract_ad_hoc.add_argument("--controlled-source-repo", type=Path, required=True)
     extract_ad_hoc.add_argument("--output", type=Path, help="optional stage JSON output path")
     extract_ad_hoc.set_defaults(func=_cmd_extract_ad_hoc)
+
+    build_reports = subparsers.add_parser(
+        "build-reports", help="generate minimal XLSX, PNG, and PPTX report products"
+    )
+    build_reports.add_argument("--run-id", required=True)
+    build_reports.add_argument("--workspace-root", type=Path, default=Path("."))
+    build_reports.add_argument("--output", type=Path, help="optional report inventory JSON path")
+    build_reports.set_defaults(func=_cmd_build_reports)
 
     inventory = subparsers.add_parser("inventory", help="inventory files under a root")
     inventory.add_argument("root", type=Path)
@@ -285,6 +294,12 @@ def _cmd_extract_ad_hoc(args: argparse.Namespace) -> int:
     )
     _write_json(result.to_dict(), args.output)
     return 0 if result.status == "pass" else 1
+
+
+def _cmd_build_reports(args: argparse.Namespace) -> int:
+    records = build_report_product_evidence(run_id=args.run_id, workspace_root=args.workspace_root)
+    _write_json(list(records), args.output)
+    return 0
 
 
 def _cmd_inventory(args: argparse.Namespace) -> int:
