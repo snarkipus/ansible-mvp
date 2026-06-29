@@ -1,0 +1,22 @@
+schema_version: "0.1"
+product:
+  name: required_extract
+  relative_path: provenance/products/extracted/required.csv
+  display_path: products/extracted/required.csv
+  role: extracted_product
+  producing_stage: extract_required
+format:
+  type: csv
+  delimiter: ","
+  encoding: utf-8
+expectations:
+  expected_header:
+    - logical_group
+    - example
+    - value
+  expected_column_count: 3
+  minimum_data_rows: 1
+  non_empty: true
+evidence:
+  output_path: provenance/validations/required_extract.json
+  manifest_section: validations
