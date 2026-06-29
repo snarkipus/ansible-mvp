@@ -8,6 +8,7 @@ import yaml
 
 from provenance.cli import main
 from provenance.scheduler import write_mock_lsf_metadata
+from provenance.stages import run_synthetic_simulation
 from provenance.workspace import materialize_inputs, prepare_workspace
 
 
@@ -51,6 +52,15 @@ def _write_config(path: Path) -> None:
                     "metadata_path": "provenance/scheduler/submission.yaml",
                     "require_real_lsf": False,
                 },
+                "stages": [
+                    {
+                        "name": "run_simulation",
+                        "command": "procs/run-script.sh",
+                        "working_directory": "sim-run-root",
+                        "inputs": ["sim-run-root/input"],
+                        "outputs": ["sim-run-root/lists/dirC/sim-out.dat"],
+                    }
+                ],
             }
         ),
         encoding="utf-8",
@@ -241,6 +251,63 @@ def test_cli_submit_mock_lsf_writes_scheduler_yaml(tmp_path: Path) -> None:
     assert metadata["provenance_root"] == "runs/demo_006/provenance"
 
 
+def test_run_synthetic_simulation_writes_raw_output_and_stage_evidence(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "run.synthetic.yaml"
+    controlled_repo = _create_controlled_source_repo(tmp_path / "controlled-source-demo")
+    _write_config(config_path)
+    prepare_workspace(config_path=config_path, run_id="demo_007", workspace_root=tmp_path)
+    materialize_inputs(
+        config_path=config_path,
+        run_id="demo_007",
+        workspace_root=tmp_path,
+        controlled_source_repo=controlled_repo,
+        controlled_source_ref="controlled-source-demo-v0.1.0",
+    )
+    assert (
+        main(
+            [
+                "materialize-procs",
+                "--config",
+                str(config_path),
+                "--run-id",
+                "demo_007",
+                "--workspace-root",
+                str(tmp_path),
+                "--controlled-source-repo",
+                str(controlled_repo),
+                "--controlled-source-ref",
+                "controlled-source-demo-v0.1.0",
+            ]
+        )
+        == 0
+    )
+
+    result = run_synthetic_simulation(
+        config_path=config_path,
+        run_id="demo_007",
+        workspace_root=tmp_path,
+        controlled_source_repo=controlled_repo,
+    )
+
+    raw_output = tmp_path / "runs/demo_007/sim-run-root/lists/dirC/sim-out.dat"
+    assert raw_output.is_file()
+    assert raw_output.read_text(encoding="utf-8").splitlines()[0] == (
+        "logical_group,example,bytes,sha256_prefix"
+    )
+    assert result.status == "pass"
+    assert result.return_code == 0
+    assert result.working_directory == "runs/demo_007/sim-run-root"
+    assert result.stdout_log == "runs/demo_007/provenance/logs/run_simulation.stdout.log"
+    output = result.outputs[0]
+    assert output.relative_path == "sim-run-root/lists/dirC/sim-out.dat"
+    assert output.sim_area == "lists"
+    assert output.logical_group == "dirC"
+    assert output.role == "raw_output"
+    assert output.sha256 is not None and len(output.sha256) == 64
+
+
 def _create_controlled_source_repo(path: Path) -> Path:
     (path / "fixtures/controlled_inputs").mkdir(parents=True)
     for group in ("dirA", "dirB", "dirC"):
@@ -250,10 +317,40 @@ def _create_controlled_source_repo(path: Path) -> Path:
             (group_path / name).write_text(f"{group},{name}\n", encoding="utf-8")
     (path / "procs").mkdir()
     run_script = path / "procs/run-script.sh"
-    run_script.write_text("#!/usr/bin/env bash\nset -euo pipefail\n", encoding="utf-8")
+    run_script.write_text(
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        "run_root=${1:-$(pwd -P)}\n"
+        'exec "$SYNTHETIC_SIM_ENGINE" "$run_root"\n',
+        encoding="utf-8",
+    )
     run_script.chmod(0o755)
+    (path / "scripts").mkdir()
+    engine = path / "scripts/synthetic_sim_engine.sh"
+    engine.write_text(
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        "run_root=${1:-$(pwd -P)}\n"
+        "input_root=$run_root/input\n"
+        "output_dir=$run_root/lists/dirC\n"
+        'mkdir -p -- "$output_dir"\n'
+        "output_file=$output_dir/sim-out.dat\n"
+        "printf 'logical_group,example,bytes,sha256_prefix\\n' >\"$output_file\"\n"
+        "for logical_group in dirA dirB dirC; do\n"
+        "  for example in ex1.dat ex2.dat ex3.dat; do\n"
+        "    input_file=$input_root/$logical_group/$example\n"
+        "    byte_count=$(wc -c <\"$input_file\" | tr -d ' ')\n"
+        "    sha_prefix=$(sha256sum \"$input_file\" | cut -d ' ' -f 1 | cut -c 1-12)\n"
+        '    printf \'%s,%s,%s,%s\\n\' "$logical_group" "$example" '
+        '"$byte_count" "$sha_prefix" >>"$output_file"\n'
+        "  done\n"
+        "done\n"
+        "printf 'Wrote synthetic raw output: %s\\n' \"$output_file\"\n",
+        encoding="utf-8",
+    )
+    engine.chmod(0o755)
     _git(path, "init")
-    _git(path, "add", "fixtures", "procs")
+    _git(path, "add", "fixtures", "procs", "scripts")
     _git(
         path,
         "-c",

@@ -62,7 +62,12 @@ submit-mock-lsf: ## Write mock LSF scheduler metadata without requiring real LSF
 		--output "$(PROVENANCE_ROOT)/scheduler/submission.yaml"
 
 run-simulation: ## Execute the controlled synthetic simulation stage.
-	@$(MAKE) _not-implemented TARGET=$@ BEAD=ansible-mvp-izo.5.1
+	uv run provenance run-simulation \
+		--config configs/run.synthetic.yaml \
+		--run-id "$(RUN_ID)" \
+		--workspace-root . \
+		--controlled-source-repo "$(CONTROLLED_SOURCE_REPO)" \
+		--output "$(PROVENANCE_ROOT)/logs/run_simulation.stage.json"
 
 extract-required: ## Produce the required extracted CSV from raw simulation outputs.
 	@$(MAKE) _not-implemented TARGET=$@ BEAD=ansible-mvp-izo.5.2

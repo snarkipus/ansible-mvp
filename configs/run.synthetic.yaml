@@ -23,6 +23,7 @@ repositories:
       - src/provenance/manifest.py
       - src/provenance/preflight.py
       - src/provenance/scheduler.py
+      - src/provenance/stages.py
       - src/provenance/validation.py
       - src/provenance/workspace.py
   controlled_source:
@@ -176,7 +177,7 @@ stages:
     outputs:
       - provenance/scheduler/submission.yaml
   - name: run_simulation
-    command: sim-run-root/procs/run-script.sh
+    command: procs/run-script.sh
     working_directory: sim-run-root
     command_kind: materialized_controlled_script
     approved_command_path: procs/run-script.sh
