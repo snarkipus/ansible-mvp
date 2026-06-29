@@ -158,6 +158,24 @@ def test_manifest_smoke_reports_missing_required_key_values() -> None:
     assert "hash_policy.algorithm" not in missing
 
 
+def test_manifest_smoke_reports_missing_required_top_level_sections() -> None:
+    incomplete_manifest = {
+        "manifest_version": "0.1",
+        "run": {"run_id": "demo_001"},
+        "repositories": [{"name": "controlled-source-demo"}],
+    }
+
+    missing = missing_required_sections(incomplete_manifest)
+
+    assert "controlled_source_gate" in missing
+    assert "raw_simulation_outputs" in missing
+    assert "derived_products" in missing
+    assert "notes" in missing
+    assert "manifest_version" not in missing
+    assert "run" not in missing
+    assert "repositories" not in missing
+
+
 def test_write_manifest_creates_yaml_file(tmp_path: Path) -> None:
     manifest = assemble_manifest(
         ManifestAssemblyInput(

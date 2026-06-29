@@ -50,7 +50,7 @@
 
 ## 7. Tests And Documentation
 
-- [ ] 7.1 Add unit tests for Git state capture, tracked script detection, wrapper controlled path detection, SHA-256 hashing, inventory metadata, CSV shape validation, and manifest smoke validation.
+- [x] 7.1 Add unit tests for Git state capture, tracked script detection, wrapper controlled path detection, SHA-256 hashing, inventory metadata, CSV shape validation, and manifest smoke validation.
 - [ ] 7.2 Add smoke tests for a clean synthetic run, dirty controlled source failure, dirty wrapper controlled path failure, untracked script failure, uncontrolled stage command failure, missing ref failure, absent real LSF tools, manifest generation, exact report product generation, product separation from `sim-run-root/`, and required CSV validation.
 - [ ] 7.3 Add a quality gate target that runs `uv run ruff format --check`, `uv run ruff check`, `uv run mypy`, and `uv run pytest` in that order.
 - [ ] 7.4 Add `docs/how_to_use_this_mvp.md` for junior engineers, covering prerequisites, setup, bootstrap, run commands, expected outputs, manifest inspection, extension points, controlled-script rules, validation/report additions, troubleshooting, and what not to change.

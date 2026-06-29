@@ -48,6 +48,25 @@ def test_resolve_ref_and_script_identity_for_clean_tracked_script(tmp_path: Path
     assert identity.file_mode == "100755"
 
 
+def test_script_identity_marks_untracked_scripts_unusable(tmp_path: Path) -> None:
+    repo = _init_repo(tmp_path)
+    _git(repo, "commit", "--allow-empty", "-m", "initial")
+    script = repo / "scripts" / "local-only.sh"
+    script.parent.mkdir()
+    script.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    script.chmod(0o755)
+
+    identity = script_identity(repo, "scripts/local-only.sh")
+
+    assert identity.exists is True
+    assert identity.is_tracked is False
+    assert identity.is_dirty is True
+    assert identity.executable is True
+    assert identity.is_usable is False
+    assert identity.blob_oid is None
+    assert identity.file_mode is None
+
+
 def test_tracked_file_state_detects_untracked_and_dirty_paths(tmp_path: Path) -> None:
     repo = _init_repo(tmp_path)
     tracked = repo / "tracked.sh"
