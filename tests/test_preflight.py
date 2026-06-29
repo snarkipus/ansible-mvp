@@ -86,6 +86,37 @@ def test_preflight_fails_for_missing_ref_untracked_script_and_uncontrolled_stage
     assert "references unknown controlled script: missing_name" in message
 
 
+@pytest.mark.parametrize(
+    ("command", "expected_message"),
+    [
+        ("sh -c 'make preflight'", "command invokes shell interpreter"),
+        ("bash -c 'make preflight'", "command invokes shell interpreter"),
+        ("python script.py > output.csv", "command uses shell-style syntax"),
+        ("make preflight | tee output.log", "command uses shell-style syntax"),
+        ("make preflight && make prepare-workspace", "command uses shell-style syntax"),
+        ("make $(printf preflight)", "command uses shell-style syntax"),
+        ("make `printf preflight`", "command uses shell-style syntax"),
+    ],
+)
+def test_preflight_rejects_shell_style_stage_commands(
+    tmp_path: Path, command: str, expected_message: str
+) -> None:
+    wrapper, controlled, config = _prepare_repositories(tmp_path)
+    config_payload = yaml.safe_load(config.read_text(encoding="utf-8"))
+    config_payload["stages"][0]["command"] = command
+    config.write_text(yaml.safe_dump(config_payload, sort_keys=False), encoding="utf-8")
+
+    with pytest.raises(PreflightError) as error:
+        run_preflight(
+            config_path=config,
+            wrapper_repo=wrapper,
+            controlled_source_repo=controlled,
+            controlled_source_ref="controlled-source-demo-v0.1.0",
+        )
+
+    assert expected_message in str(error.value)
+
+
 def _prepare_repositories(tmp_path: Path) -> tuple[Path, Path, Path]:
     wrapper = _init_repo(tmp_path / "wrapper")
     controlled = _init_repo(tmp_path / "controlled-source-demo")

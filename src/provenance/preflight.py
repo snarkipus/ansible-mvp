@@ -23,6 +23,10 @@ class PreflightError(RuntimeError):
     """Raised when the workflow must not proceed past preflight."""
 
 
+_SHELL_INTERPRETERS = {"bash", "dash", "ksh", "sh", "zsh"}
+_UNSAFE_SHELL_CHARS = frozenset("|&;<>`$()")
+
+
 @dataclass(frozen=True)
 class PreflightResult:
     """Structured preflight evidence for logs and manifests."""
@@ -244,7 +248,10 @@ def _validate_stages(
 def _validate_command_matches_approved_path(
     name: str, kind: str, command: str, approved_path: str, failures: list[str]
 ) -> None:
-    first_token = shlex.split(command)[0]
+    tokens = _validate_simple_command(name, command, failures)
+    if not tokens:
+        return
+    first_token = tokens[0]
     if kind == "wrapper_make_target":
         if first_token != "make" or approved_path != "Makefile":
             failures.append(f"stage {name} is not constrained to the wrapper Makefile")
@@ -259,6 +266,35 @@ def _validate_command_matches_approved_path(
             failures.append(
                 f"stage {name} materialized command {first_token} does not map to {approved_path}"
             )
+
+
+def _validate_simple_command(name: str, command: str, failures: list[str]) -> list[str] | None:
+    """Validate a configured stage command is executable-plus-arguments only."""
+
+    try:
+        tokens = shlex.split(command)
+    except ValueError as exc:
+        failures.append(f"stage {name} command is not parseable: {exc}")
+        return None
+
+    if not tokens:
+        failures.append(f"stage {name} command is empty")
+        return None
+
+    if any(char in command for char in _UNSAFE_SHELL_CHARS):
+        failures.append(
+            f"stage {name} command uses shell-style syntax; "
+            "only simple executable-plus-arguments commands are allowed"
+        )
+
+    executable_name = Path(tokens[0]).name
+    if executable_name in _SHELL_INTERPRETERS:
+        failures.append(
+            f"stage {name} command invokes shell interpreter {tokens[0]}; "
+            "configured stage commands must not use shell interpreters"
+        )
+
+    return tokens
 
 
 def _stage_repository_key(kind: str) -> str | None:
