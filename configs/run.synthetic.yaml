@@ -10,6 +10,9 @@ repositories:
     clean_policy: configured_paths_only
     controlled_paths:
       - Makefile
+      - ansible/inventory/localhost.ini
+      - ansible/inventory/group_vars/all.yml
+      - ansible/playbooks/run_synthetic_workflow.yml
       - configs/run.synthetic.yaml
       - configs/expected_shape.required_extract.yaml
       - scripts/bootstrap_controlled_source.sh

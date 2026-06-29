@@ -1,0 +1,48 @@
+---
+- name: Run local synthetic provenance workflow
+  hosts: provenance_mvp
+  gather_facts: false
+
+  vars:
+    workflow_run_id: "{{ run_id | default(default_run_id) }}"
+    workflow_controlled_source_repo: >-
+      {{ controlled_source_repo | default(default_controlled_source_repo) }}
+    workflow_controlled_source_ref: >-
+      {{ controlled_source_ref | default(default_controlled_source_ref) }}
+
+  pre_tasks:
+    - name: Require run_id, controlled_source_repo, and controlled_source_ref values
+      ansible.builtin.assert:
+        that:
+          - workflow_run_id | length > 0
+          - workflow_controlled_source_repo | length > 0
+          - workflow_controlled_source_ref | length > 0
+        fail_msg: >-
+          run_id, controlled_source_repo, and controlled_source_ref must resolve
+          to non-empty values for the synthetic provenance workflow.
+
+    - name: Verify the wrapper Makefile exists
+      ansible.builtin.stat:
+        path: "{{ provenance_wrapper_repo }}/Makefile"
+      register: wrapper_makefile
+
+    - name: Fail when the wrapper Makefile is missing
+      ansible.builtin.assert:
+        that:
+          - wrapper_makefile.stat.exists
+          - wrapper_makefile.stat.isreg
+        fail_msg: "Expected Makefile at {{ provenance_wrapper_repo }}/Makefile"
+
+  tasks:
+    - name: Run workflow stage through the Make contract
+      ansible.builtin.command:
+        argv:
+          - "{{ make_executable }}"
+          - "{{ item }}"
+          - "RUN_ID={{ workflow_run_id }}"
+          - "CONTROLLED_SOURCE_REPO={{ workflow_controlled_source_repo }}"
+          - "CONTROLLED_SOURCE_REF={{ workflow_controlled_source_ref }}"
+      args:
+        chdir: "{{ provenance_wrapper_repo }}"
+      loop: "{{ workflow_stage_targets }}"
+      changed_when: true

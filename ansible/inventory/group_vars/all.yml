@@ -1,0 +1,24 @@
+---
+default_run_id: demo_001
+default_controlled_source_repo: ../controlled-source-demo
+default_controlled_source_ref: controlled-source-demo-v0.1.0
+
+provenance_wrapper_repo: "{{ playbook_dir }}/../.."
+run_config_path: configs/run.synthetic.yaml
+shape_config_path: configs/expected_shape.required_extract.yaml
+make_executable: make
+
+workflow_stage_targets:
+  - preflight
+  - prepare-workspace
+  - materialize-inputs
+  - materialize-procs
+  - submit-mock-lsf
+  - run-simulation
+  - extract-required
+  - extract-ad-hoc
+  - build-reports
+  - inventory-pre
+  - inventory-post
+  - validate
+  - manifest
