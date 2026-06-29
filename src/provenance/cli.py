@@ -30,6 +30,7 @@ from provenance.manifest import (
     missing_required_sections,
     write_manifest,
 )
+from provenance.preflight import PreflightError, run_preflight
 from provenance.validation import CSVShapeExpectation, validate_csv_product
 
 
@@ -40,7 +41,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         return int(args.func(args))
-    except (GitStateError, FileNotFoundError, NotADirectoryError, ValueError) as exc:
+    except (
+        GitStateError,
+        PreflightError,
+        FileNotFoundError,
+        NotADirectoryError,
+        ValueError,
+    ) as exc:
         parser.exit(2, f"provenance: error: {exc}\n")
 
 
@@ -59,6 +66,14 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     git_state.add_argument("--output", type=Path, help="optional JSON output path")
     git_state.set_defaults(func=_cmd_git_state)
+
+    preflight = subparsers.add_parser("preflight", help="run controlled-source preflight gate")
+    preflight.add_argument("--config", type=Path, default=Path("configs/run.synthetic.yaml"))
+    preflight.add_argument("--wrapper-repo", type=Path, default=Path("."))
+    preflight.add_argument("--controlled-source-repo", type=Path, required=True)
+    preflight.add_argument("--controlled-source-ref", required=True)
+    preflight.add_argument("--output", type=Path, help="optional JSON output path")
+    preflight.set_defaults(func=_cmd_preflight)
 
     inventory = subparsers.add_parser("inventory", help="inventory files under a root")
     inventory.add_argument("root", type=Path)
@@ -115,6 +130,17 @@ def _cmd_git_state(args: argparse.Namespace) -> int:
         payload["scripts"].append(_script_payload(args.repo, relative_path))
 
     _write_json(payload, args.output)
+    return 0
+
+
+def _cmd_preflight(args: argparse.Namespace) -> int:
+    result = run_preflight(
+        config_path=args.config,
+        wrapper_repo=args.wrapper_repo,
+        controlled_source_repo=args.controlled_source_repo,
+        controlled_source_ref=args.controlled_source_ref,
+    )
+    _write_json(result.to_dict(), args.output)
     return 0
 
 

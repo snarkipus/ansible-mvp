@@ -27,7 +27,7 @@
 
 - [x] 4.1 Add `configs/run.synthetic.yaml` and `configs/expected_shape.required_extract.yaml` with the documented synthetic run, controlled scripts, stage declarations, approved command paths, hash policy, layout, and validation expectations.
 - [x] 4.2 Add `ansible/inventory/localhost.ini`, group variables, and `ansible/playbooks/run_synthetic_workflow.yml` for local execution.
-- [ ] 4.3 Implement preflight so missing repos, non-Git repos, unresolved refs, dirty controlled source state, dirty wrapper controlled paths, missing scripts, untracked scripts, unknown controlled script references, and uncontrolled stage command paths fail before execution.
+- [x] 4.3 Implement preflight so missing repos, non-Git repos, unresolved refs, dirty controlled source state, dirty wrapper controlled paths, missing scripts, untracked scripts, unknown controlled script references, and uncontrolled stage command paths fail before execution.
 - [ ] 4.4 Implement workspace preparation for `runs/{run_id}/sim-run-root/` and `runs/{run_id}/provenance/` without placing provenance files inside `sim-run-root/`.
 - [ ] 4.5 Implement input and runtime-script materialization, including copying `procs/run-script.sh` from controlled source into `sim-run-root/procs/run-script.sh`.
 - [ ] 4.6 Implement mock LSF submission metadata under `provenance/scheduler/` without requiring real LSF commands.

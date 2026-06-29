@@ -8,6 +8,7 @@ missing repositories, unresolved refs, dirty worktrees, and untracked scripts.
 from __future__ import annotations
 
 import subprocess
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -216,7 +217,7 @@ def script_identity(repo_path: Path | str, relative_path: str | Path) -> ScriptI
     )
 
 
-def assert_clean_tracked_files(repo_path: Path | str, relative_paths: list[str | Path]) -> None:
+def assert_clean_tracked_files(repo_path: Path | str, relative_paths: Sequence[str | Path]) -> None:
     """Raise ``GitStateError`` if any configured path is missing, untracked, or dirty."""
 
     failures: list[str] = []

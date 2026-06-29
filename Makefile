@@ -7,6 +7,8 @@ RUN_ID ?= demo_001
 CONTROLLED_SOURCE_REPO ?= ../controlled-source-demo
 CONTROLLED_SOURCE_REF ?= controlled-source-demo-v0.1.0
 PYTHON_PACKAGE := src/provenance
+RUN_ROOT := runs/$(RUN_ID)
+PROVENANCE_ROOT := $(RUN_ROOT)/provenance
 
 .PHONY: help \
 	bootstrap-controlled-source preflight prepare-workspace \
@@ -21,7 +23,12 @@ bootstrap-controlled-source: ## Bootstrap or verify the sibling controlled sourc
 	./scripts/bootstrap_controlled_source.sh "$(CONTROLLED_SOURCE_REPO)"
 
 preflight: ## Run the Git-controlled source entrance gate before workflow stages.
-	@$(MAKE) _not-implemented TARGET=$@ BEAD=ansible-mvp-izo.4.3
+	uv run provenance preflight \
+		--config configs/run.synthetic.yaml \
+		--wrapper-repo . \
+		--controlled-source-repo "$(CONTROLLED_SOURCE_REPO)" \
+		--controlled-source-ref "$(CONTROLLED_SOURCE_REF)" \
+		--output "$(PROVENANCE_ROOT)/preflight.json"
 
 prepare-workspace: ## Prepare runs/$(RUN_ID)/sim-run-root and provenance sidecar directories.
 	@$(MAKE) _not-implemented TARGET=$@ BEAD=ansible-mvp-izo.4.4

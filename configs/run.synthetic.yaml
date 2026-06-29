@@ -21,6 +21,7 @@ repositories:
       - src/provenance/hashing.py
       - src/provenance/inventory.py
       - src/provenance/manifest.py
+      - src/provenance/preflight.py
       - src/provenance/validation.py
   controlled_source:
     name: controlled-source-demo
