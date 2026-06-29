@@ -156,6 +156,104 @@ def run_synthetic_simulation(
     )
 
 
+def run_required_extraction(
+    *,
+    config_path: Path | str,
+    run_id: str,
+    controlled_source_repo: Path | str,
+    workspace_root: Path | str = Path("."),
+) -> StageResult:
+    """Execute the controlled required extraction stage.
+
+    The extractor is run from the controlled source repository, but any
+    configured run-relative input/output arguments are resolved into the wrapper
+    run directory. The derived CSV is written under the provenance sidecar, not
+    under ``sim-run-root``.
+    """
+
+    return _run_configured_stage(
+        config_path=Path(config_path),
+        run_id=run_id,
+        controlled_source_repo=Path(controlled_source_repo),
+        workspace_root=Path(workspace_root),
+        stage_name="extract_required",
+    )
+
+
+def _run_configured_stage(
+    *,
+    config_path: Path,
+    run_id: str,
+    controlled_source_repo: Path,
+    workspace_root: Path,
+    stage_name: str,
+) -> StageResult:
+    if not run_id:
+        raise ValueError("run_id must be non-empty")
+
+    root = workspace_root.expanduser().resolve()
+    controlled_root = controlled_source_repo.expanduser().resolve()
+    config = _read_yaml_mapping(config_path)
+    layout = _mapping(config.get("layout"), "layout")
+    stage = _stage_by_name(config, stage_name)
+    run_root = root / _format_layout_path(layout, "run_root", run_id)
+    sim_run_root = root / _format_layout_path(layout, "sim_run_root", run_id)
+    provenance_root = root / _format_layout_path(layout, "provenance_root", run_id)
+    log_root = provenance_root / "logs"
+    log_root.mkdir(parents=True, exist_ok=True)
+
+    command = _non_empty_string(stage.get("command"), f"stages.{stage_name}.command")
+    working_directory = _working_directory(
+        root,
+        sim_run_root,
+        controlled_root,
+        _non_empty_string(stage.get("working_directory"), f"stages.{stage_name}.working_directory"),
+    )
+    argv = _stage_command_argv(command, stage, working_directory, run_root, controlled_root)
+
+    stdout_log = log_root / f"{stage_name}.stdout.log"
+    stderr_log = log_root / f"{stage_name}.stderr.log"
+    with (
+        stdout_log.open("w", encoding="utf-8") as stdout_obj,
+        stderr_log.open("w", encoding="utf-8") as stderr_obj,
+    ):
+        completed = subprocess.run(  # noqa: S603 - command is validated by preflight/config
+            argv,
+            cwd=working_directory,
+            env=os.environ.copy(),
+            stdout=stdout_obj,
+            stderr=stderr_obj,
+            check=False,
+            text=True,
+        )
+
+    inputs = tuple(
+        _artifact(_stage_artifact_path(root, run_root, input_path), input_path, include_hash=True)
+        for input_path in _stage_paths(stage.get("inputs"), "inputs", stage_name=stage_name)
+    )
+    outputs = tuple(
+        _artifact(_stage_artifact_path(root, run_root, output_path), output_path, include_hash=True)
+        for output_path in _stage_paths(stage.get("outputs"), "outputs", stage_name=stage_name)
+    )
+    status = (
+        "pass" if completed.returncode == 0 and all(output.exists for output in outputs) else "fail"
+    )
+
+    return StageResult(
+        name=stage_name,
+        command=command,
+        working_directory=working_directory.relative_to(root).as_posix()
+        if working_directory.is_relative_to(root)
+        else working_directory.as_posix(),
+        stdout_log=stdout_log.relative_to(root).as_posix(),
+        stderr_log=stderr_log.relative_to(root).as_posix(),
+        status=status,
+        return_code=completed.returncode,
+        inputs=inputs,
+        outputs=outputs,
+    )
+
+
 def _artifact(path: Path, relative_path: Path, *, include_hash: bool) -> StageArtifact:
     normalized_relative = relative_path.as_posix()
     metadata_path = _metadata_relative_path(relative_path)
@@ -184,9 +282,10 @@ def _stage_artifact_path(root: Path, run_root: Path, relative_path: Path) -> Pat
 
 def _metadata_relative_path(relative_path: Path) -> str:
     parts = relative_path.parts
-    if "sim-run-root" in parts:
-        index = parts.index("sim-run-root")
-        return Path(*parts[index + 1 :]).as_posix()
+    for root_marker in ("sim-run-root", "provenance"):
+        if root_marker in parts:
+            index = parts.index(root_marker)
+            return Path(*parts[index + 1 :]).as_posix()
     return relative_path.as_posix()
 
 
@@ -210,9 +309,39 @@ def _stage_by_name(config: dict[str, Any], name: str) -> dict[str, Any]:
     raise ValueError(f"configured stage is missing: {name}")
 
 
-def _stage_paths(value: object, field_name: str) -> tuple[Path, ...]:
+def _stage_command_argv(
+    command: str,
+    stage: dict[str, Any],
+    working_directory: Path,
+    run_root: Path,
+    controlled_root: Path,
+) -> list[str]:
+    argv = shlex.split(command)
+    if not argv:
+        raise ValueError("stage command must not be empty")
+    if stage.get("command_kind") == "controlled_source_script":
+        argv[0] = (controlled_root / argv[0]).as_posix()
+    elif not Path(argv[0]).is_absolute() and not (working_directory / argv[0]).exists():
+        candidate = controlled_root / argv[0]
+        if candidate.exists():
+            argv[0] = candidate.as_posix()
+    return [_resolve_run_argument(argument, run_root) for argument in argv]
+
+
+def _resolve_run_argument(argument: str, run_root: Path) -> str:
+    path = Path(argument)
+    if path.is_absolute() or not path.parts:
+        return argument
+    if path.parts[0] in {"sim-run-root", "provenance"}:
+        return (run_root / path).as_posix()
+    return argument
+
+
+def _stage_paths(
+    value: object, field_name: str, *, stage_name: str = "run_simulation"
+) -> tuple[Path, ...]:
     return tuple(
-        Path(path) for path in _string_list(value or [], f"stages.run_simulation.{field_name}")
+        Path(path) for path in _string_list(value or [], f"stages.{stage_name}.{field_name}")
     )
 
 

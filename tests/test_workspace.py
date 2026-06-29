@@ -8,7 +8,7 @@ import yaml
 
 from provenance.cli import main
 from provenance.scheduler import write_mock_lsf_metadata
-from provenance.stages import run_synthetic_simulation
+from provenance.stages import run_required_extraction, run_synthetic_simulation
 from provenance.workspace import materialize_inputs, prepare_workspace
 
 
@@ -59,7 +59,18 @@ def _write_config(path: Path) -> None:
                         "working_directory": "sim-run-root",
                         "inputs": ["sim-run-root/input"],
                         "outputs": ["sim-run-root/lists/dirC/sim-out.dat"],
-                    }
+                    },
+                    {
+                        "name": "extract_required",
+                        "command": (
+                            "scripts/extract_required.pl sim-run-root/lists/dirC/sim-out.dat "
+                            "provenance/products/extracted/required.csv"
+                        ),
+                        "working_directory": "controlled_source_repo",
+                        "command_kind": "controlled_source_script",
+                        "inputs": ["sim-run-root/lists/dirC/sim-out.dat"],
+                        "outputs": ["provenance/products/extracted/required.csv"],
+                    },
                 ],
             }
         ),
@@ -308,6 +319,111 @@ def test_run_synthetic_simulation_writes_raw_output_and_stage_evidence(
     assert output.sha256 is not None and len(output.sha256) == 64
 
 
+def test_required_extraction_writes_derived_csv_outside_sim_run_root_and_stage_evidence(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "run.synthetic.yaml"
+    controlled_repo = _create_controlled_source_repo(tmp_path / "controlled-source-demo")
+    _write_config(config_path)
+    prepare_workspace(config_path=config_path, run_id="demo_008", workspace_root=tmp_path)
+    materialize_inputs(
+        config_path=config_path,
+        run_id="demo_008",
+        workspace_root=tmp_path,
+        controlled_source_repo=controlled_repo,
+        controlled_source_ref="controlled-source-demo-v0.1.0",
+    )
+    main(
+        [
+            "materialize-procs",
+            "--config",
+            str(config_path),
+            "--run-id",
+            "demo_008",
+            "--workspace-root",
+            str(tmp_path),
+            "--controlled-source-repo",
+            str(controlled_repo),
+            "--controlled-source-ref",
+            "controlled-source-demo-v0.1.0",
+        ]
+    )
+    run_synthetic_simulation(
+        config_path=config_path,
+        run_id="demo_008",
+        workspace_root=tmp_path,
+        controlled_source_repo=controlled_repo,
+    )
+
+    result = run_required_extraction(
+        config_path=config_path,
+        run_id="demo_008",
+        workspace_root=tmp_path,
+        controlled_source_repo=controlled_repo,
+    )
+
+    required_csv = tmp_path / "runs/demo_008/provenance/products/extracted/required.csv"
+    assert required_csv.is_file()
+    assert not (tmp_path / "runs/demo_008/sim-run-root/provenance").exists()
+    assert required_csv.read_text(encoding="utf-8").splitlines() == [
+        "logical_group,example,bytes,sha256_prefix",
+        "dirC,ex1.dat,13,eebd9e4163d9",
+        "dirC,ex2.dat,13,3a5f7839e322",
+        "dirC,ex3.dat,13,6300c7d48a99",
+    ]
+    assert result.status == "pass"
+    assert result.return_code == 0
+    assert result.working_directory == "controlled-source-demo"
+    assert result.stdout_log == "runs/demo_008/provenance/logs/extract_required.stdout.log"
+    assert result.inputs[0].relative_path == "sim-run-root/lists/dirC/sim-out.dat"
+    assert result.inputs[0].role == "raw_output"
+    assert result.inputs[0].sha256 is not None
+    output = result.outputs[0]
+    assert output.relative_path == "provenance/products/extracted/required.csv"
+    assert output.role == "extracted_product"
+    assert output.sha256 is not None and len(output.sha256) == 64
+
+
+def test_cli_extract_required_writes_stage_json(tmp_path: Path) -> None:
+    config_path = tmp_path / "run.synthetic.yaml"
+    controlled_repo = _create_controlled_source_repo(tmp_path / "controlled-source-demo")
+    output_path = tmp_path / "runs/demo_009/provenance/logs/extract_required.stage.json"
+    _write_config(config_path)
+    prepare_workspace(config_path=config_path, run_id="demo_009", workspace_root=tmp_path)
+    raw_output = tmp_path / "runs/demo_009/sim-run-root/lists/dirC/sim-out.dat"
+    raw_output.parent.mkdir(parents=True)
+    raw_output.write_text(
+        "logical_group,example,bytes,sha256_prefix\n"
+        "dirA,ex1.dat,13,ignoredaaaaa\n"
+        "dirC,ex1.dat,13,7fee469deaea\n",
+        encoding="utf-8",
+    )
+
+    assert (
+        main(
+            [
+                "extract-required",
+                "--config",
+                str(config_path),
+                "--run-id",
+                "demo_009",
+                "--workspace-root",
+                str(tmp_path),
+                "--controlled-source-repo",
+                str(controlled_repo),
+                "--output",
+                str(output_path),
+            ]
+        )
+        == 0
+    )
+
+    evidence = json.loads(output_path.read_text(encoding="utf-8"))
+    assert evidence["name"] == "extract_required"
+    assert evidence["outputs"][0]["relative_path"] == "provenance/products/extracted/required.csv"
+    assert (tmp_path / "runs/demo_009/provenance/products/extracted/required.csv").is_file()
+
+
 def _create_controlled_source_repo(path: Path) -> Path:
     (path / "fixtures/controlled_inputs").mkdir(parents=True)
     for group in ("dirA", "dirB", "dirC"):
@@ -349,6 +465,26 @@ def _create_controlled_source_repo(path: Path) -> Path:
         encoding="utf-8",
     )
     engine.chmod(0o755)
+    extractor = path / "scripts/extract_required.pl"
+    extractor.write_text(
+        "#!/usr/bin/env perl\n"
+        "use strict;\n"
+        "use warnings;\n"
+        "my ($input_path, $output_path) = @ARGV;\n"
+        "open my $in, '<', $input_path or die \"Cannot read $input_path: $!\\n\";\n"
+        "open my $out, '>', $output_path or die \"Cannot write $output_path: $!\\n\";\n"
+        "my $header = <$in>;\n"
+        "chomp $header;\n"
+        'print {$out} "$header\\n";\n'
+        "while (my $line = <$in>) {\n"
+        "  chomp $line;\n"
+        "  my ($logical_group, $example, $bytes, $sha_prefix) = split /,/, $line;\n"
+        "  next unless defined $logical_group && $logical_group eq 'dirC';\n"
+        "  print {$out} join(',', $logical_group, $example, $bytes, $sha_prefix), \"\\n\";\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    extractor.chmod(0o755)
     _git(path, "init")
     _git(path, "add", "fixtures", "procs", "scripts")
     _git(

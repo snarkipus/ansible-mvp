@@ -70,7 +70,12 @@ run-simulation: ## Execute the controlled synthetic simulation stage.
 		--output "$(PROVENANCE_ROOT)/logs/run_simulation.stage.json"
 
 extract-required: ## Produce the required extracted CSV from raw simulation outputs.
-	@$(MAKE) _not-implemented TARGET=$@ BEAD=ansible-mvp-izo.5.2
+	uv run provenance extract-required \
+		--config configs/run.synthetic.yaml \
+		--run-id "$(RUN_ID)" \
+		--workspace-root . \
+		--controlled-source-repo "$(CONTROLLED_SOURCE_REPO)" \
+		--output "$(PROVENANCE_ROOT)/logs/extract_required.stage.json"
 
 extract-ad-hoc: ## Produce the ad hoc extracted CSV from raw simulation outputs.
 	@$(MAKE) _not-implemented TARGET=$@ BEAD=ansible-mvp-izo.5.3
