@@ -13,8 +13,9 @@ expectations:
   expected_header:
     - logical_group
     - example
-    - value
-  expected_column_count: 3
+    - bytes
+    - sha256_prefix
+  expected_column_count: 4
   minimum_data_rows: 1
   non_empty: true
 evidence:

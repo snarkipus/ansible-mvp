@@ -67,8 +67,8 @@ def test_run_config_links_layout_hash_policy_and_validation_expectations() -> No
     assert required_extract["product_path"] == shape["product"]["relative_path"]
     assert required_extract["evidence_path"] == shape["evidence"]["output_path"]
     assert shape["expectations"] == {
-        "expected_header": ["logical_group", "example", "value"],
-        "expected_column_count": 3,
+        "expected_header": ["logical_group", "example", "bytes", "sha256_prefix"],
+        "expected_column_count": 4,
         "minimum_data_rows": 1,
         "non_empty": True,
     }
