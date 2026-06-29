@@ -8,6 +8,7 @@ from provenance.manifest import (
     REQUIRED_TOP_LEVEL_SECTIONS,
     ManifestAssemblyInput,
     assemble_manifest,
+    missing_required_key_values,
     missing_required_sections,
     write_manifest,
 )
@@ -135,6 +136,26 @@ def test_assemble_manifest_connects_core_provenance_sections() -> None:
     assert manifest["validations"][0]["status"] == "pass"
     assert manifest["hash_policy"]["algorithm"] == "sha256"
     assert manifest["config"]["run_config"] == "configs/run.synthetic.yaml"
+
+
+def test_manifest_smoke_reports_missing_required_key_values() -> None:
+    manifest = assemble_manifest(
+        ManifestAssemblyInput(
+            run={"run_id": ""},
+            repositories=(),
+            simulation_layout={"sim_run_root": "runs/demo_001/sim-run-root"},
+            controlled_source_gate={"status": "pass"},
+            scheduler={"mode": "mock_lsf"},
+        )
+    )
+
+    missing = missing_required_key_values(manifest)
+
+    assert "run.run_id" in missing
+    assert "run.run_root" in missing
+    assert "repositories" in missing
+    assert "inputs" in missing
+    assert "hash_policy.algorithm" not in missing
 
 
 def test_write_manifest_creates_yaml_file(tmp_path: Path) -> None:

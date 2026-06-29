@@ -30,6 +30,7 @@ from provenance.manifest import (
     ManifestAssemblyInput,
     assemble_manifest,
     assemble_run_manifest,
+    missing_required_key_values,
     missing_required_sections,
     write_manifest,
 )
@@ -660,13 +661,15 @@ def _cmd_assemble_run_manifest(args: argparse.Namespace) -> int:
 def _cmd_smoke_manifest(args: argparse.Namespace) -> int:
     manifest = _read_yaml_mapping(args.manifest)
     missing = missing_required_sections(manifest)
+    missing_key_values = missing_required_key_values(manifest)
     payload = {
-        "status": "pass" if not missing else "fail",
+        "status": "pass" if not missing and not missing_key_values else "fail",
         "manifest": args.manifest.as_posix(),
         "missing_required_sections": list(missing),
+        "missing_required_key_values": list(missing_key_values),
     }
     _write_json(payload, args.output)
-    return 0 if not missing else 1
+    return 0 if not missing and not missing_key_values else 1
 
 
 def _tracked_file_payload(repo: Path, relative_path: str) -> dict[str, Any]:

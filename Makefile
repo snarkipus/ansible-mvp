@@ -14,7 +14,7 @@ PROVENANCE_ROOT := $(RUN_ROOT)/provenance
 	bootstrap-controlled-source preflight prepare-workspace \
 	materialize-inputs materialize-procs submit-mock-lsf run-simulation \
 	extract-required extract-ad-hoc build-reports inventory-pre inventory-post \
-	validate manifest format lint typecheck test check clean
+	validate manifest manifest-smoke format lint typecheck test check clean
 
 help: ## Show documented Make targets.
 	@awk 'BEGIN {FS = ":.*## "; printf "Usage: make <target> [RUN_ID=%s]\n\nTargets:\n", "$(RUN_ID)"} /^[a-zA-Z0-9_-]+:.*## / {printf "  %-28s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -106,7 +106,7 @@ inventory-post: ## Inventory post-run raw outputs and derived products.
 		--raw-output "$(PROVENANCE_ROOT)/inventories/post_run_raw_outputs.json" \
 		--products-output "$(PROVENANCE_ROOT)/inventories/post_run_derived_products.json"
 
-validate: ## Validate extracted products and run manifest smoke checks.
+validate: ## Validate extracted products.
 	uv run provenance validate-required \
 		--shape-config configs/expected_shape.required_extract.yaml \
 		--run-id "$(RUN_ID)" \
@@ -120,6 +120,11 @@ manifest: ## Assemble runs/$(RUN_ID)/provenance/manifest.yaml.
 		--controlled-source-repo "$(CONTROLLED_SOURCE_REPO)" \
 		--controlled-source-ref "$(CONTROLLED_SOURCE_REF)" \
 		--output "$(PROVENANCE_ROOT)/manifest.yaml"
+
+manifest-smoke: ## Smoke-validate required manifest sections and key values.
+	uv run provenance smoke-manifest \
+		"$(PROVENANCE_ROOT)/manifest.yaml" \
+		--output "$(PROVENANCE_ROOT)/validations/manifest_smoke.json"
 
 format: ## Format Python source and tests with Ruff.
 	uv run ruff format $(PYTHON_PACKAGE) tests

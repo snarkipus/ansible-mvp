@@ -22,3 +22,4 @@ workflow_stage_targets:
   - inventory-post
   - validate
   - manifest
+  - manifest-smoke

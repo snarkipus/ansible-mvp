@@ -43,6 +43,7 @@ def test_group_vars_define_documented_defaults_and_stage_order() -> None:
         "inventory-post",
         "validate",
         "manifest",
+        "manifest-smoke",
     ]
 
 

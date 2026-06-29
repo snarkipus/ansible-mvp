@@ -224,11 +224,30 @@ def test_cli_assembles_and_smoke_validates_manifest(tmp_path: Path, capsys) -> N
     input_yaml.write_text(
         yaml.safe_dump(
             {
-                "run": {"run_id": "demo_001"},
-                "repositories": [],
-                "simulation_layout": {"sim_run_root": "runs/demo_001/sim-run-root"},
+                "run": {"run_id": "demo_001", "run_root": "runs/demo_001"},
+                "repositories": [
+                    {
+                        "name": "ansible-mvp",
+                        "path": "/workspace/ansible-mvp",
+                        "resolved_commit": "a" * 40,
+                        "worktree_status": "clean",
+                    }
+                ],
+                "simulation_layout": {
+                    "run_root": "runs/demo_001",
+                    "sim_run_root": "runs/demo_001/sim-run-root",
+                    "provenance_root": "runs/demo_001/provenance",
+                },
                 "controlled_source_gate": {"status": "pass"},
                 "scheduler": {"mode": "mock_lsf"},
+                "inputs": [{"relative_path": "input/dirC/ex1.dat"}],
+                "runtime_scripts": [{"relative_path": "procs/run-script.sh"}],
+                "stages": [{"name": "run_simulation", "status": "pass"}],
+                "raw_simulation_outputs": [{"relative_path": "lists/dirC/sim-out.dat"}],
+                "derived_products": [{"relative_path": "products/extracted/required.csv"}],
+                "validations": [{"path": "products/extracted/required.csv", "status": "pass"}],
+                "logs": [{"path": "logs/run_simulation.stdout.log"}],
+                "notes": ["smoke-test manifest"],
             }
         ),
         encoding="utf-8",
@@ -241,7 +260,28 @@ def test_cli_assembles_and_smoke_validates_manifest(tmp_path: Path, capsys) -> N
     smoke = json.loads(capsys.readouterr().out)
     manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
     assert smoke["missing_required_sections"] == []
+    assert smoke["missing_required_key_values"] == []
     assert tuple(manifest)[: len(REQUIRED_TOP_LEVEL_SECTIONS)] == REQUIRED_TOP_LEVEL_SECTIONS
+
+
+def test_cli_manifest_smoke_fails_for_missing_key_values(tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
+    manifest_path = tmp_path / "manifest.yaml"
+    manifest_path.write_text(
+        yaml.safe_dump(
+            {
+                section: ({"run_id": ""} if section == "run" else [])
+                for section in REQUIRED_TOP_LEVEL_SECTIONS
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert main(["smoke-manifest", str(manifest_path)]) == 1
+
+    smoke = json.loads(capsys.readouterr().out)
+    assert smoke["status"] == "fail"
+    assert smoke["missing_required_sections"] == []
+    assert "run.run_id" in smoke["missing_required_key_values"]
 
 
 def test_cli_assembles_run_manifest_from_workflow_evidence(tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]

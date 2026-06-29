@@ -41,6 +41,31 @@ REQUIRED_TOP_LEVEL_SECTIONS: tuple[str, ...] = (
     "hash_policy",
     "notes",
 )
+REQUIRED_NON_EMPTY_KEY_PATHS: tuple[str, ...] = (
+    "manifest_version",
+    "run.run_id",
+    "run.run_root",
+    "repositories",
+    "repositories[].name",
+    "repositories[].path",
+    "repositories[].resolved_commit",
+    "repositories[].worktree_status",
+    "simulation_layout.run_root",
+    "simulation_layout.sim_run_root",
+    "simulation_layout.provenance_root",
+    "controlled_source_gate.status",
+    "scheduler.mode",
+    "inputs",
+    "runtime_scripts",
+    "stages",
+    "raw_simulation_outputs",
+    "derived_products",
+    "validations",
+    "validations[].status",
+    "logs",
+    "hash_policy.algorithm",
+    "notes",
+)
 
 
 class SerializableRecord(Protocol):
@@ -208,6 +233,21 @@ def missing_required_sections(manifest: Mapping[str, object]) -> tuple[str, ...]
     return tuple(section for section in REQUIRED_TOP_LEVEL_SECTIONS if section not in manifest)
 
 
+def missing_required_key_values(manifest: Mapping[str, object]) -> tuple[str, ...]:
+    """Return required key paths whose values are absent or empty.
+
+    The MVP deliberately uses smoke-level validation instead of a full schema. A
+    value is considered present when it is not ``None``, an empty string, or an
+    empty collection. Paths ending in ``[]`` apply to every record in a required
+    non-empty list and report the first missing item by index.
+    """
+
+    missing: list[str] = []
+    for key_path in REQUIRED_NON_EMPTY_KEY_PATHS:
+        missing.extend(_missing_for_key_path(manifest, key_path))
+    return tuple(missing)
+
+
 def _repository_manifest_record(
     *, name: str, path: Path, requested_ref: str | None
 ) -> dict[str, Any]:
@@ -261,6 +301,50 @@ def _read_json_records(directory: Path, pattern: str) -> list[dict[str, Any]]:
     if not directory.exists():
         return []
     return [_read_json_mapping(path) for path in sorted(directory.glob(pattern))]
+
+
+def _missing_for_key_path(manifest: Mapping[str, object], key_path: str) -> list[str]:
+    current_values: list[object] = [manifest]
+    display_paths: list[str] = [""]
+    for part in key_path.split("."):
+        next_values: list[object] = []
+        next_display_paths: list[str] = []
+        if part.endswith("[]"):
+            key = part[:-2]
+            for value, display_path in zip(current_values, display_paths, strict=True):
+                if not isinstance(value, Mapping):
+                    return [key_path]
+                sequence = value.get(key)
+                if not _has_non_empty_value(sequence) or not isinstance(sequence, list | tuple):
+                    return [_join_key_path(display_path, key)]
+                for index, item in enumerate(sequence):
+                    next_values.append(item)
+                    next_display_paths.append(f"{_join_key_path(display_path, key)}[{index}]")
+        else:
+            for value, display_path in zip(current_values, display_paths, strict=True):
+                if not isinstance(value, Mapping):
+                    return [key_path]
+                if part not in value or not _has_non_empty_value(value.get(part)):
+                    return [_join_key_path(display_path, part)]
+                next_values.append(value[part])
+                next_display_paths.append(_join_key_path(display_path, part))
+        current_values = next_values
+        display_paths = next_display_paths
+    return []
+
+
+def _has_non_empty_value(value: object) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, Mapping | list | tuple):
+        return bool(value)
+    return True
+
+
+def _join_key_path(prefix: str, part: str) -> str:
+    return f"{prefix}.{part}" if prefix else part
 
 
 def _read_json_list(path: Path) -> list[Any]:
@@ -366,5 +450,6 @@ __all__ = [
     "assemble_manifest",
     "assemble_run_manifest",
     "missing_required_sections",
+    "missing_required_key_values",
     "write_manifest",
 ]
