@@ -46,6 +46,7 @@ class SerializableRecord(Protocol):
 
     def to_dict(self) -> Mapping[str, object]:
         """Return a serializable mapping."""
+        ...
 
 
 ManifestRecord = Mapping[str, object] | SerializableRecord | object
