@@ -36,8 +36,14 @@
 
 ## OpenCode/OpenSpec
 - Repo-local OpenCode commands exist under `.opencode/commands/`: `/opsx-propose`, `/opsx-apply`, `/opsx-explore`, and `/opsx-archive`.
-- For substantial implementation work, prefer the local OpenSpec workflow: propose the change, implement tasks, then archive when complete.
+- OpenSpec is used for proposal/spec/design/task artifacts; do not use `/opsx-apply` for current MVP implementation unless explicitly requested.
 - If using OpenSpec CLI output, trust resolved paths from `openspec status --change <name> --json`; do not assume fixed change/artifact paths beyond what the CLI reports.
+
+## Implementation Workflow
+- Drive implementation from beads, not OpenSpec apply: `bd ready --json`, inspect/claim one actionable bead, implement it, reconcile it with OpenSpec, then close it.
+- Keep commits incremental: commit after each completed bead task, and commit again when an epic is completed if closing the epic changes tracked artifacts.
+- Before closing a bead, verify its acceptance/success criteria, update the corresponding OpenSpec task checkbox if implementation is complete, and surface any user decision needed.
+- Use `/opsx-archive` only after beads are closed/reconciled and the implemented change is validated.
 
 ## OpenSpec and Beads Sync
 - OpenSpec artifacts are the human-facing source of truth; beads are the agentic operating memory.
