@@ -41,8 +41,10 @@
 
 ## Implementation Workflow
 - Drive implementation from beads, not OpenSpec apply: `bd ready --json`, inspect/claim one actionable bead, implement it, reconcile it with OpenSpec, then close it.
-- Keep commits incremental: commit after each completed bead task, and commit again when an epic is completed if closing the epic changes tracked artifacts.
+- Keep commits incremental: commit after each completed bead task; when an epic is completed, close the epic and commit that closure separately if it changes tracked artifacts.
 - Before closing a bead, verify its acceptance/success criteria, update the corresponding OpenSpec task checkbox if implementation is complete, and surface any user decision needed.
+- Run the relevant quality gates before closing implementation beads. For Python/code changes this means `make check`, which includes `uv run ruff format --check`, `uv run ruff check`, `uv run mypy`, and `uv run pytest`; also run targeted checks when they better isolate the changed behavior.
+- Do not close or commit a bead with failing lint, type checks, tests, OpenSpec validation, or `bd lint --json` unless the failure is explicitly documented as an accepted blocker.
 - Use `/opsx-archive` only after beads are closed/reconciled and the implemented change is validated.
 
 ## OpenSpec and Beads Sync
