@@ -31,6 +31,7 @@ from provenance.manifest import (
     write_manifest,
 )
 from provenance.preflight import PreflightError, run_preflight
+from provenance.scheduler import write_mock_lsf_metadata
 from provenance.validation import CSVShapeExpectation, validate_csv_product
 from provenance.workspace import materialize_inputs, materialize_runtime_scripts, prepare_workspace
 
@@ -96,6 +97,13 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     _add_materialization_arguments(materialize_procs)
     materialize_procs.set_defaults(func=_cmd_materialize_procs)
+
+    mock_lsf = subparsers.add_parser("submit-mock-lsf", help="write mock LSF scheduler metadata")
+    mock_lsf.add_argument("--config", type=Path, default=Path("configs/run.synthetic.yaml"))
+    mock_lsf.add_argument("--run-id", required=True)
+    mock_lsf.add_argument("--workspace-root", type=Path, default=Path("."))
+    mock_lsf.add_argument("--output", type=Path, help="optional scheduler YAML output path")
+    mock_lsf.set_defaults(func=_cmd_submit_mock_lsf)
 
     inventory = subparsers.add_parser("inventory", help="inventory files under a root")
     inventory.add_argument("root", type=Path)
@@ -197,6 +205,17 @@ def _cmd_materialize_procs(args: argparse.Namespace) -> int:
         workspace_root=args.workspace_root,
     )
     _write_json(result.to_dict(), args.output)
+    return 0
+
+
+def _cmd_submit_mock_lsf(args: argparse.Namespace) -> int:
+    payload = write_mock_lsf_metadata(
+        config_path=args.config,
+        run_id=args.run_id,
+        workspace_root=args.workspace_root,
+        output=args.output,
+    )
+    _write_json(payload, None)
     return 0
 
 

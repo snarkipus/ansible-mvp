@@ -22,6 +22,7 @@ repositories:
       - src/provenance/inventory.py
       - src/provenance/manifest.py
       - src/provenance/preflight.py
+      - src/provenance/scheduler.py
       - src/provenance/validation.py
       - src/provenance/workspace.py
   controlled_source:

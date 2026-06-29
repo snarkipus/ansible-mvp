@@ -7,6 +7,7 @@ from pathlib import Path
 import yaml
 
 from provenance.cli import main
+from provenance.scheduler import write_mock_lsf_metadata
 from provenance.workspace import materialize_inputs, prepare_workspace
 
 
@@ -44,6 +45,11 @@ def _write_config(path: Path) -> None:
                         "materialized_path": "sim-run-root/procs/run-script.sh",
                         "materialization_mode": "copy_from_controlled_source",
                     },
+                },
+                "scheduler": {
+                    "mode": "mock_lsf",
+                    "metadata_path": "provenance/scheduler/submission.yaml",
+                    "require_real_lsf": False,
                 },
             }
         ),
@@ -179,6 +185,60 @@ def test_cli_materialize_procs_copies_runtime_script_and_writes_evidence(tmp_pat
     assert artifact["hash_status"] == "hashed"
     assert len(artifact["sha256"]) == 64
     assert artifact["role"] == "runtime_script"
+
+
+def test_write_mock_lsf_metadata_records_absent_lsf_tools_without_failing(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "run.synthetic.yaml"
+    _write_config(config_path)
+    prepare_workspace(config_path=config_path, run_id="demo_005", workspace_root=tmp_path)
+
+    payload = write_mock_lsf_metadata(
+        config_path=config_path,
+        run_id="demo_005",
+        workspace_root=tmp_path,
+        tool_resolver=lambda _name: None,
+    )
+
+    output_path = tmp_path / "runs/demo_005/provenance/scheduler/submission.yaml"
+    assert output_path.is_file()
+    written = yaml.safe_load(output_path.read_text(encoding="utf-8"))
+    assert payload["mode"] == "mock_lsf"
+    assert written["scheduler"] == "mock_lsf"
+    assert written["real_lsf_required"] is False
+    assert all(not tool["available"] for tool in written["real_lsf_tools"].values())
+    assert written["metadata_path"] == "runs/demo_005/provenance/scheduler/submission.yaml"
+    assert "sim-run-root" not in written["metadata_path"]
+
+
+def test_cli_submit_mock_lsf_writes_scheduler_yaml(tmp_path: Path) -> None:
+    config_path = tmp_path / "run.synthetic.yaml"
+    output_path = tmp_path / "runs/demo_006/provenance/scheduler/submission.yaml"
+    _write_config(config_path)
+    prepare_workspace(config_path=config_path, run_id="demo_006", workspace_root=tmp_path)
+
+    assert (
+        main(
+            [
+                "submit-mock-lsf",
+                "--config",
+                str(config_path),
+                "--run-id",
+                "demo_006",
+                "--workspace-root",
+                str(tmp_path),
+                "--output",
+                str(output_path),
+            ]
+        )
+        == 0
+    )
+
+    metadata = yaml.safe_load(output_path.read_text(encoding="utf-8"))
+    assert metadata["submission"]["job_id"] == "mock-demo_006"
+    assert metadata["submission"]["command"] == "make submit-mock-lsf"
+    assert metadata["provenance_root"] == "runs/demo_006/provenance"
 
 
 def _create_controlled_source_repo(path: Path) -> Path:

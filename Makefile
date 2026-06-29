@@ -55,7 +55,11 @@ materialize-procs: ## Materialize sim-run-root/procs/run-script.sh from controll
 		--output "$(PROVENANCE_ROOT)/inventories/materialized_runtime_scripts.json"
 
 submit-mock-lsf: ## Write mock LSF scheduler metadata without requiring real LSF tools.
-	@$(MAKE) _not-implemented TARGET=$@ BEAD=ansible-mvp-izo.4.6
+	uv run provenance submit-mock-lsf \
+		--config configs/run.synthetic.yaml \
+		--run-id "$(RUN_ID)" \
+		--workspace-root . \
+		--output "$(PROVENANCE_ROOT)/scheduler/submission.yaml"
 
 run-simulation: ## Execute the controlled synthetic simulation stage.
 	@$(MAKE) _not-implemented TARGET=$@ BEAD=ansible-mvp-izo.5.1
