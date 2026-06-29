@@ -113,7 +113,13 @@ validate: ## Validate extracted products and run manifest smoke checks.
 		--workspace-root .
 
 manifest: ## Assemble runs/$(RUN_ID)/provenance/manifest.yaml.
-	@$(MAKE) _not-implemented TARGET=$@ BEAD=ansible-mvp-izo.6.4
+	uv run provenance assemble-run-manifest \
+		--config configs/run.synthetic.yaml \
+		--run-id "$(RUN_ID)" \
+		--workspace-root . \
+		--controlled-source-repo "$(CONTROLLED_SOURCE_REPO)" \
+		--controlled-source-ref "$(CONTROLLED_SOURCE_REF)" \
+		--output "$(PROVENANCE_ROOT)/manifest.yaml"
 
 format: ## Format Python source and tests with Ruff.
 	uv run ruff format $(PYTHON_PACKAGE) tests

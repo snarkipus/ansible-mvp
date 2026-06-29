@@ -1,4 +1,5 @@
 import json
+import subprocess
 from pathlib import Path
 
 import yaml
@@ -241,3 +242,197 @@ def test_cli_assembles_and_smoke_validates_manifest(tmp_path: Path, capsys) -> N
     manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
     assert smoke["missing_required_sections"] == []
     assert tuple(manifest)[: len(REQUIRED_TOP_LEVEL_SECTIONS)] == REQUIRED_TOP_LEVEL_SECTIONS
+
+
+def test_cli_assembles_run_manifest_from_workflow_evidence(tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
+    controlled_repo = tmp_path / "controlled-source-demo"
+    _init_controlled_source_repo(controlled_repo)
+    run_root = tmp_path / "runs" / "demo_001"
+    sim_root = run_root / "sim-run-root"
+    provenance_root = run_root / "provenance"
+    inventories_root = provenance_root / "inventories"
+    logs_root = provenance_root / "logs"
+    validations_root = provenance_root / "validations"
+    scheduler_root = provenance_root / "scheduler"
+    for directory in (inventories_root, logs_root, validations_root, scheduler_root):
+        directory.mkdir(parents=True, exist_ok=True)
+    (sim_root / "procs").mkdir(parents=True, exist_ok=True)
+
+    _write_json(
+        provenance_root / "preflight.json",
+        {
+            "status": "pass",
+            "controlled_source_repo": {
+                "path": controlled_repo.as_posix(),
+                "ref": "controlled-source-demo-v0.1.0",
+            },
+            "controlled_scripts": [{"name": "run_script", "relative_path": "procs/run-script.sh"}],
+        },
+    )
+    _write_json(
+        inventories_root / "pre_run_inputs.json",
+        [
+            {
+                "relative_path": "input/dirC/ex1.dat",
+                "run_relative_path": "runs/demo_001/sim-run-root/input/dirC/ex1.dat",
+                "sim_area": "input",
+                "logical_group": "dirC",
+                "role": "input",
+                "sha256": "a" * 64,
+                "hash_status": "hashed",
+            }
+        ],
+    )
+    _write_json(
+        inventories_root / "pre_run_controlled_scripts.json",
+        [
+            {
+                "relative_path": "procs/run-script.sh",
+                "run_relative_path": "runs/demo_001/sim-run-root/procs/run-script.sh",
+                "role": "runtime_script",
+                "sha256": "b" * 64,
+                "hash_status": "hashed",
+            }
+        ],
+    )
+    _write_json(
+        inventories_root / "post_run_raw_outputs.json",
+        [
+            {
+                "relative_path": "lists/dirC/sim-out.dat",
+                "workflow_relative_path": "sim-run-root/lists/dirC/sim-out.dat",
+                "sim_area": "lists",
+                "logical_group": "dirC",
+                "role": "raw_output",
+                "sha256": "c" * 64,
+                "hash_status": "hashed",
+            }
+        ],
+    )
+    _write_json(
+        inventories_root / "post_run_derived_products.json",
+        [
+            {
+                "relative_path": "products/extracted/required.csv",
+                "workflow_relative_path": "provenance/products/extracted/required.csv",
+                "product_area": "extracted",
+                "role": "extracted_product",
+                "producing_stage": "extract_required",
+                "sha256": "d" * 64,
+            }
+        ],
+    )
+    _write_json(
+        validations_root / "required_extract.json",
+        {"path": "products/extracted/required.csv", "status": "pass", "checks": []},
+    )
+    (logs_root / "run_simulation.stdout.log").write_text("ok\n", encoding="utf-8")
+    (logs_root / "run_simulation.stderr.log").write_text("", encoding="utf-8")
+    _write_json(
+        logs_root / "run_simulation.stage.json",
+        {
+            "name": "run_simulation",
+            "command": "procs/run-script.sh",
+            "status": "pass",
+            "return_code": 0,
+            "logs": {
+                "stdout": "runs/demo_001/provenance/logs/run_simulation.stdout.log",
+                "stderr": "runs/demo_001/provenance/logs/run_simulation.stderr.log",
+            },
+        },
+    )
+    (scheduler_root / "submission.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "mode": "mock_lsf",
+                "scheduler": "mock_lsf",
+                "metadata_path": "runs/demo_001/provenance/scheduler/submission.yaml",
+            }
+        ),
+        encoding="utf-8",
+    )
+    manifest_path = provenance_root / "manifest.yaml"
+
+    assert (
+        main(
+            [
+                "assemble-run-manifest",
+                "--run-id",
+                "demo_001",
+                "--workspace-root",
+                str(tmp_path),
+                "--controlled-source-repo",
+                str(controlled_repo),
+                "--controlled-source-ref",
+                "controlled-source-demo-v0.1.0",
+                "--output",
+                str(manifest_path),
+            ]
+        )
+        == 0
+    )
+
+    assert json.loads(capsys.readouterr().out)["status"] == "pass"
+    manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+    assert tuple(manifest)[: len(REQUIRED_TOP_LEVEL_SECTIONS)] == REQUIRED_TOP_LEVEL_SECTIONS
+    assert manifest["run"]["run_id"] == "demo_001"
+    assert manifest["repositories"][1]["requested_ref"] == "controlled-source-demo-v0.1.0"
+    assert manifest["repositories"][1]["tracked_script_paths"] == [
+        "procs/run-script.sh",
+        "scripts/synthetic_sim_engine.sh",
+        "scripts/extract_required.pl",
+        "scripts/ad_hoc_extract.py",
+    ]
+    assert len(manifest["repositories"][1]["scripts"][0]["sha256"]) == 64
+    assert manifest["repositories"][1]["scripts"][0]["hash_status"] == "hashed"
+    assert manifest["controlled_source_gate"]["status"] == "pass"
+    assert manifest["scheduler"]["mode"] == "mock_lsf"
+    assert manifest["inputs"][0]["logical_group"] == "dirC"
+    assert manifest["runtime_scripts"][0]["role"] == "runtime_script"
+    assert manifest["stages"][0]["status"] == "pass"
+    assert manifest["raw_simulation_outputs"][0]["sim_area"] == "lists"
+    assert manifest["derived_products"][0]["producing_stage"] == "extract_required"
+    assert manifest["validations"][0]["status"] == "pass"
+    assert {log["stream"] for log in manifest["logs"]} == {"stdout", "stderr"}
+    assert manifest["hash_policy"]["algorithm"] == "sha256"
+
+
+def _init_controlled_source_repo(path: Path) -> None:
+    for relative_path in (
+        "procs/run-script.sh",
+        "scripts/synthetic_sim_engine.sh",
+        "scripts/extract_required.pl",
+        "scripts/ad_hoc_extract.py",
+    ):
+        target = path / relative_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+        target.chmod(0o755)
+    subprocess.run(["git", "init"], cwd=path, check=True, stdout=subprocess.DEVNULL)
+    subprocess.run(["git", "add", "."], cwd=path, check=True, stdout=subprocess.DEVNULL)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=Test User",
+            "-c",
+            "user.email=test@example.invalid",
+            "commit",
+            "-m",
+            "seed controlled source",
+        ],
+        cwd=path,
+        check=True,
+        stdout=subprocess.DEVNULL,
+    )
+    subprocess.run(
+        ["git", "tag", "controlled-source-demo-v0.1.0"],
+        cwd=path,
+        check=True,
+        stdout=subprocess.DEVNULL,
+    )
+
+
+def _write_json(path: Path, payload: object) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")

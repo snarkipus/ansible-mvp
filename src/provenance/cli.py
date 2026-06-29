@@ -29,6 +29,7 @@ from provenance.inventory import InventoryRecord, inventory_files, with_sha256
 from provenance.manifest import (
     ManifestAssemblyInput,
     assemble_manifest,
+    assemble_run_manifest,
     missing_required_sections,
     write_manifest,
 )
@@ -198,6 +199,19 @@ def _build_parser() -> argparse.ArgumentParser:
     assemble.add_argument("input", type=Path, help="YAML mapping of manifest assembly fields")
     assemble.add_argument("--output", type=Path, required=True, help="manifest YAML output path")
     assemble.set_defaults(func=_cmd_assemble_manifest)
+
+    assemble_run = subparsers.add_parser(
+        "assemble-run-manifest", help="assemble a run manifest from workflow evidence files"
+    )
+    assemble_run.add_argument("--config", type=Path, default=Path("configs/run.synthetic.yaml"))
+    assemble_run.add_argument("--run-id", required=True)
+    assemble_run.add_argument("--workspace-root", type=Path, default=Path("."))
+    assemble_run.add_argument("--controlled-source-repo", type=Path, required=True)
+    assemble_run.add_argument("--controlled-source-ref", required=True)
+    assemble_run.add_argument(
+        "--output", type=Path, required=True, help="manifest YAML output path"
+    )
+    assemble_run.set_defaults(func=_cmd_assemble_run_manifest)
 
     smoke = subparsers.add_parser("smoke-manifest", help="smoke-validate manifest sections")
     smoke.add_argument("manifest", type=Path)
@@ -625,6 +639,19 @@ def _cmd_validate_required(args: argparse.Namespace) -> int:
 def _cmd_assemble_manifest(args: argparse.Namespace) -> int:
     source = _read_yaml_mapping(args.input)
     manifest = assemble_manifest(ManifestAssemblyInput(**source))
+    write_manifest(manifest, args.output)
+    _write_json({"status": "pass", "manifest": args.output.as_posix()}, None)
+    return 0
+
+
+def _cmd_assemble_run_manifest(args: argparse.Namespace) -> int:
+    manifest = assemble_run_manifest(
+        config_path=args.config,
+        run_id=args.run_id,
+        workspace_root=args.workspace_root,
+        controlled_source_repo=args.controlled_source_repo,
+        controlled_source_ref=args.controlled_source_ref,
+    )
     write_manifest(manifest, args.output)
     _write_json({"status": "pass", "manifest": args.output.as_posix()}, None)
     return 0
