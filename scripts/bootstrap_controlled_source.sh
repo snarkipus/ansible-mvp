@@ -7,7 +7,31 @@ project_root=$(cd "$script_dir/.." && pwd -P)
 fixture_source_dir="$project_root/templates/controlled-source-demo/fixtures/controlled_inputs"
 proc_source_dir="$project_root/templates/controlled-source-demo/procs"
 script_source_dir="$project_root/templates/controlled-source-demo/scripts"
+template_root="$project_root/templates/controlled-source-demo"
 expected_tag=controlled-source-demo-v0.1.0
+
+expected_files=(
+  fixtures/controlled_inputs/dirA/ex1.dat
+  fixtures/controlled_inputs/dirA/ex2.dat
+  fixtures/controlled_inputs/dirA/ex3.dat
+  fixtures/controlled_inputs/dirB/ex1.dat
+  fixtures/controlled_inputs/dirB/ex2.dat
+  fixtures/controlled_inputs/dirB/ex3.dat
+  fixtures/controlled_inputs/dirC/ex1.dat
+  fixtures/controlled_inputs/dirC/ex2.dat
+  fixtures/controlled_inputs/dirC/ex3.dat
+  procs/run-script.sh
+  scripts/synthetic_sim_engine.sh
+  scripts/extract_required.pl
+  scripts/ad_hoc_extract.py
+)
+
+expected_executable_files=(
+  procs/run-script.sh
+  scripts/synthetic_sim_engine.sh
+  scripts/extract_required.pl
+  scripts/ad_hoc_extract.py
+)
 
 repo_display=$controlled_source_repo
 repo_parent=$(dirname -- "$controlled_source_repo")
@@ -16,6 +40,54 @@ repo_name=$(basename -- "$controlled_source_repo")
 fail() {
   printf 'ERROR: %s\n' "$1" >&2
   exit 1
+}
+
+is_expected_executable() {
+  local candidate=$1
+  local expected
+  for expected in "${expected_executable_files[@]}"; do
+    if [[ "$candidate" == "$expected" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+verify_existing_controlled_source_compatibility() {
+  local resolved_commit tag_commit relative_path tracked_mode
+
+  for relative_path in "${expected_files[@]}"; do
+    if [[ ! -f "$controlled_source_repo/$relative_path" ]]; then
+      fail "controlled source compatibility error: expected file is missing: $relative_path"
+    fi
+
+    if ! git -C "$controlled_source_repo" ls-files --error-unmatch -- "$relative_path" >/dev/null 2>&1; then
+      fail "controlled source compatibility error: expected file is not tracked by Git: $relative_path"
+    fi
+
+    if ! cmp -s -- "$template_root/$relative_path" "$controlled_source_repo/$relative_path"; then
+      fail "controlled source compatibility error: expected file differs from bootstrap template: $relative_path"
+    fi
+
+    if is_expected_executable "$relative_path"; then
+      read -r tracked_mode _ < <(git -C "$controlled_source_repo" ls-files --stage -- "$relative_path")
+      if [[ "$tracked_mode" != "100755" ]]; then
+        fail "controlled source compatibility error: expected script is not tracked executable: $relative_path"
+      fi
+    fi
+  done
+
+  if ! git -C "$controlled_source_repo" rev-parse --verify --quiet "refs/tags/$expected_tag" >/dev/null; then
+    fail "controlled source compatibility error: expected tag is missing: $expected_tag"
+  fi
+
+  resolved_commit=$(git -C "$controlled_source_repo" rev-parse HEAD)
+  tag_commit=$(git -C "$controlled_source_repo" rev-list -n 1 "$expected_tag")
+  if [[ "$tag_commit" != "$resolved_commit" ]]; then
+    fail "controlled source compatibility error: tag $expected_tag points at $tag_commit, not current commit $resolved_commit"
+  fi
+
+  printf 'Verified controlled source compatibility for %s at %s\n' "$repo_display" "$resolved_commit"
 }
 
 repo_physical_path() {
@@ -69,6 +141,8 @@ else
   fi
 
   printf 'Verified clean controlled source Git repository at %s\n' "$repo_display"
+  verify_existing_controlled_source_compatibility
+  exit 0
 fi
 
 mkdir -p -- "$controlled_source_repo/fixtures"
