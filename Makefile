@@ -93,7 +93,11 @@ build-reports: ## Generate summary.xlsx, chart.png, and briefing.pptx derived re
 		--stage-output "$(PROVENANCE_ROOT)/logs/build_reports.stage.json"
 
 inventory-pre: ## Inventory pre-run controlled inputs and runtime scripts.
-	@$(MAKE) _not-implemented TARGET=$@ BEAD=ansible-mvp-izo.6.1
+	uv run provenance inventory-pre \
+		--run-id "$(RUN_ID)" \
+		--workspace-root . \
+		--inputs-output "$(PROVENANCE_ROOT)/inventories/pre_run_inputs.json" \
+		--scripts-output "$(PROVENANCE_ROOT)/inventories/pre_run_controlled_scripts.json"
 
 inventory-post: ## Inventory post-run raw outputs and derived products.
 	@$(MAKE) _not-implemented TARGET=$@ BEAD=ansible-mvp-izo.6.2

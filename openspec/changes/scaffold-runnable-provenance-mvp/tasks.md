@@ -42,7 +42,7 @@
 
 ## 6. Manifest And Validation
 
-- [ ] 6.1 Generate pre-run input and controlled-script inventories under `provenance/inventories/`.
+- [x] 6.1 Generate pre-run input and controlled-script inventories under `provenance/inventories/`.
 - [ ] 6.2 Generate post-run raw-output and derived-product inventories under `provenance/inventories/`, including raw output identity for `sim-run-root/lists/dirC/sim-out.dat` with `sim_area: lists` and `logical_group: dirC`.
 - [ ] 6.3 Run CSV shape validation for `required.csv` and write validation evidence under `provenance/validations/`.
 - [ ] 6.4 Assemble `runs/{run_id}/provenance/manifest.yaml` with required top-level sections and links between repositories, branch/tag/describe output, script hashes, scheduler metadata, inputs, runtime scripts, stages, logs, raw outputs, derived products, validations, notes, and hash policy.

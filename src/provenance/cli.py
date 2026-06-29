@@ -158,6 +158,15 @@ def _build_parser() -> argparse.ArgumentParser:
     inventory.add_argument("--output", type=Path, help="optional JSON output path")
     inventory.set_defaults(func=_cmd_inventory)
 
+    inventory_pre = subparsers.add_parser(
+        "inventory-pre", help="write pre-run input and controlled-script inventories"
+    )
+    inventory_pre.add_argument("--run-id", required=True)
+    inventory_pre.add_argument("--workspace-root", type=Path, default=Path("."))
+    inventory_pre.add_argument("--inputs-output", type=Path)
+    inventory_pre.add_argument("--scripts-output", type=Path)
+    inventory_pre.set_defaults(func=_cmd_inventory_pre)
+
     validate_csv = subparsers.add_parser("validate-csv", help="validate CSV shape")
     validate_csv.add_argument("path", type=Path)
     validate_csv.add_argument("--display-path", help="path to record in validation evidence")
@@ -382,6 +391,81 @@ def _cmd_inventory(args: argparse.Namespace) -> int:
         )
     _write_json([record.to_dict() for record in records], args.output)
     return 0
+
+
+def _cmd_inventory_pre(args: argparse.Namespace) -> int:
+    root = args.workspace_root.expanduser().resolve()
+    run_root = root / "runs" / args.run_id
+    sim_root = run_root / "sim-run-root"
+    inventory_root = run_root / "provenance" / "inventories"
+    inputs_output = args.inputs_output or inventory_root / "pre_run_inputs.json"
+    scripts_output = args.scripts_output or inventory_root / "pre_run_controlled_scripts.json"
+
+    inputs = _pre_run_inventory_records(
+        root=root,
+        sim_root=sim_root,
+        area="input",
+        materialization_evidence=inventory_root / "materialized_inputs.json",
+    )
+    scripts = _pre_run_inventory_records(
+        root=root,
+        sim_root=sim_root,
+        area="procs",
+        materialization_evidence=inventory_root / "materialized_runtime_scripts.json",
+    )
+    _write_json(inputs, inputs_output)
+    _write_json(scripts, scripts_output)
+    _write_json(
+        {
+            "status": "pass",
+            "inputs_inventory": inputs_output.as_posix(),
+            "controlled_scripts_inventory": scripts_output.as_posix(),
+            "input_count": len(inputs),
+            "controlled_script_count": len(scripts),
+        },
+        None,
+    )
+    return 0
+
+
+def _pre_run_inventory_records(
+    *, root: Path, sim_root: Path, area: str, materialization_evidence: Path
+) -> list[dict[str, Any]]:
+    records = tuple(
+        record
+        for record in inventory_files(sim_root)
+        if record.relative_path == area or record.relative_path.startswith(f"{area}/")
+    )
+    materialized_by_destination = _materialized_artifacts_by_destination(materialization_evidence)
+    payload: list[dict[str, Any]] = []
+    for record in records:
+        hashed = with_sha256(record, hash_artifact(sim_root / record.relative_path).sha256 or "")
+        run_relative_path = (sim_root / hashed.relative_path).relative_to(root).as_posix()
+        entry: dict[str, Any] = dict(hashed.to_dict())
+        entry["run_relative_path"] = run_relative_path
+        entry["hash_status"] = "hashed"
+        entry["materialization"] = materialized_by_destination.get(run_relative_path)
+        payload.append(entry)
+    return payload
+
+
+def _materialized_artifacts_by_destination(path: Path) -> dict[str, dict[str, Any]]:
+    if not path.exists():
+        return {}
+    loaded = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(loaded, dict):
+        raise ValueError(f"materialization evidence must be a mapping: {path}")
+    artifacts = loaded.get("artifacts", [])
+    if not isinstance(artifacts, list):
+        raise ValueError(f"materialization evidence artifacts must be a list: {path}")
+    by_destination: dict[str, dict[str, Any]] = {}
+    for artifact in artifacts:
+        if not isinstance(artifact, dict):
+            raise ValueError(f"materialization artifact must be a mapping: {path}")
+        destination = artifact.get("destination_path")
+        if isinstance(destination, str) and destination:
+            by_destination[destination] = artifact
+    return by_destination
 
 
 def _add_materialization_arguments(parser: argparse.ArgumentParser) -> None:
