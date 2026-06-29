@@ -11,6 +11,9 @@ dependencies = [
     "PyYAML>=6.0",
 ]
 
+[project.scripts]
+provenance = "provenance.cli:_entrypoint"
+
 [dependency-groups]
 dev = [
     "mypy>=1.10",
