@@ -135,18 +135,14 @@ lint: ## Check Python source and tests with Ruff.
 typecheck: ## Type-check provenance helpers with mypy.
 	uv run mypy
 
-test: ## Run pytest when tests exist; pass clearly while tests are scaffold-only.
-	@if find tests -type f \( -name 'test_*.py' -o -name '*_test.py' \) | grep -q .; then \
-		uv run pytest; \
-	else \
-		printf 'No pytest test files found yet; skipping pytest for scaffold-only state.\n'; \
-	fi
+test: ## Run pytest.
+	uv run pytest
 
 check: ## Run the quality gate: format check, lint, typecheck, then tests.
 	uv run ruff format --check $(PYTHON_PACKAGE) tests
 	uv run ruff check $(PYTHON_PACKAGE) tests
 	uv run mypy
-	@$(MAKE) test
+	uv run pytest
 
 clean: ## Remove local caches and generated run outputs.
 	rm -rf .pytest_cache .ruff_cache .mypy_cache runs/*
