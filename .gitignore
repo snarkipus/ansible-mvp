@@ -4,3 +4,21 @@
 *.db
 .beads-credential-key
 .beads/proxieddb/
+
+# Generated MVP run outputs
+runs/*
+!runs/.gitkeep
+
+# Generated report/data products
+*.csv
+*.xlsx
+*.pptx
+
+# Python caches and local environments
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
