@@ -3,7 +3,7 @@
 - [x] 1.1 Add root `.gitignore` entries for generated run outputs, generated reports, Python caches, and local virtual environments without ignoring source/config files needed for the MVP.
 - [x] 1.2 Add `pyproject.toml` managed by `uv` with the MVP runtime, test, lint, format, and type-check dependencies: PyYAML, pytest, ruff, mypy, openpyxl, python-pptx, and any minimal chart dependency selected for `chart.png`.
 - [x] 1.3 Create the repository structure for `ansible/`, `configs/`, `scripts/`, `src/provenance/`, `templates/`, `tests/`, and `runs/.gitkeep`.
-- [ ] 1.4 Add `ruff` and `mypy` configuration for typed Python helpers, including package discovery for `src/provenance` and test-friendly type-check settings.
+- [x] 1.4 Add `ruff` and `mypy` configuration for typed Python helpers, including package discovery for `src/provenance` and test-friendly type-check settings.
 - [ ] 1.5 Add a Makefile with documented targets for bootstrap, preflight, workspace preparation, materialization, mock scheduler, simulation, extraction, reporting, inventory, validation, manifest generation, format, lint, typecheck, test, check, and clean operations.
 
 ## 2. Controlled Source Demo Bootstrap
