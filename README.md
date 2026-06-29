@@ -1,6 +1,6 @@
 # Provenance-First Simulation Workflow MVP
 
-Preliminary repository README for initializing a synthetic, local MVP of a provenance wrapper around an existing engineering simulation workflow.
+Runnable local MVP for a provenance wrapper around an existing engineering simulation workflow.
 
 ## Purpose
 
@@ -113,7 +113,7 @@ runs/{run_id}/
 
 The repeated `dirA`, `dirB`, and `dirC` folder names are intentional. Tools and manifests must identify artifacts by full relative path, simulation area, and logical group, not by leaf directory name alone.
 
-## Preliminary Tooling
+## Tooling
 
 Expected local tools:
 
@@ -123,15 +123,13 @@ Expected local tools:
 - Ansible
 - Python 3.11+
 - Perl
+- `uv`
 
-Suggested Python packages for the synthetic demo:
-
-- `pyyaml`
-- `openpyxl`
-- `python-pptx`
-- `pytest`
+Python dependencies are managed through `uv` from `pyproject.toml`/`uv.lock`. The MVP uses PyYAML, openpyxl, python-pptx, pytest, ruff, and mypy for runtime helpers, reporting, tests, linting, formatting, and type checks.
 
 ## Quickstart
+
+For a step-by-step operator handoff, troubleshooting notes, and safe extension rules, see [`docs/how_to_use_this_mvp.md`](docs/how_to_use_this_mvp.md).
 
 Bootstrap the synthetic controlled source repository:
 
@@ -156,18 +154,32 @@ runs/demo_001/provenance/manifest.yaml
 runs/demo_001/provenance/products/extracted/required.csv
 runs/demo_001/provenance/products/extracted/ad_hoc.csv
 runs/demo_001/provenance/products/reports/summary.xlsx
+runs/demo_001/provenance/products/reports/chart.png
 runs/demo_001/provenance/products/reports/briefing.pptx
 runs/demo_001/provenance/logs/
 runs/demo_001/sim-run-root/lists/
 runs/demo_001/sim-run-root/files/
 ```
 
-## Proposed Make Targets
+Run the local quality gate before closing code changes:
+
+```bash
+make check
+```
+
+Reconcile the active OpenSpec change and bead hygiene with:
+
+```bash
+openspec validate scaffold-runnable-provenance-mvp --type change --strict --json
+bd lint --json
+```
+
+## Make Targets
 
 ```text
 make bootstrap-controlled-source
 make preflight
-make materialize-run
+make prepare-workspace
 make materialize-inputs
 make materialize-procs
 make submit-mock-lsf
@@ -175,13 +187,20 @@ make run-simulation
 make extract-required
 make extract-ad-hoc
 make build-reports
-make inventory
+make inventory-pre
+make inventory-post
 make validate
 make manifest
+make manifest-smoke
+make format
+make lint
+make typecheck
+make test
+make check
 make clean
 ```
 
-Ansible should call these targets or equivalent commands while aggregating logs and run metadata.
+Ansible calls these targets or equivalent helper commands while aggregating logs and run metadata. For focused debugging, keep the same `RUN_ID`, `CONTROLLED_SOURCE_REPO`, and `CONTROLLED_SOURCE_REF` values and do not bypass `make preflight`.
 
 ## Controlled Source Gate
 
