@@ -107,7 +107,10 @@ inventory-post: ## Inventory post-run raw outputs and derived products.
 		--products-output "$(PROVENANCE_ROOT)/inventories/post_run_derived_products.json"
 
 validate: ## Validate extracted products and run manifest smoke checks.
-	@$(MAKE) _not-implemented TARGET=$@ BEAD=ansible-mvp-izo.6.3
+	uv run provenance validate-required \
+		--shape-config configs/expected_shape.required_extract.yaml \
+		--run-id "$(RUN_ID)" \
+		--workspace-root .
 
 manifest: ## Assemble runs/$(RUN_ID)/provenance/manifest.yaml.
 	@$(MAKE) _not-implemented TARGET=$@ BEAD=ansible-mvp-izo.6.4

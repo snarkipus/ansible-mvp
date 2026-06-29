@@ -186,6 +186,14 @@ def _build_parser() -> argparse.ArgumentParser:
     validate_csv.add_argument("--output", type=Path, help="optional JSON output path")
     validate_csv.set_defaults(func=_cmd_validate_csv)
 
+    validate_required = subparsers.add_parser(
+        "validate-required", help="validate the configured required CSV product"
+    )
+    validate_required.add_argument("--shape-config", type=Path, required=True)
+    validate_required.add_argument("--run-id", required=True)
+    validate_required.add_argument("--workspace-root", type=Path, default=Path("."))
+    validate_required.set_defaults(func=_cmd_validate_required)
+
     assemble = subparsers.add_parser("assemble-manifest", help="assemble manifest YAML")
     assemble.add_argument("input", type=Path, help="YAML mapping of manifest assembly fields")
     assemble.add_argument("--output", type=Path, required=True, help="manifest YAML output path")
@@ -575,6 +583,45 @@ def _cmd_validate_csv(args: argparse.Namespace) -> int:
     return 0 if evidence.passed else 1
 
 
+def _cmd_validate_required(args: argparse.Namespace) -> int:
+    shape = _read_yaml_mapping(args.shape_config)
+    run_root = args.workspace_root.expanduser().resolve() / "runs" / args.run_id
+    product = _required_mapping(shape, "product")
+    expectations = _required_mapping(shape, "expectations")
+    evidence_config = _required_mapping(shape, "evidence")
+
+    product_path = run_root / _required_string(product, "relative_path")
+    output_path = run_root / _required_string(evidence_config, "output_path")
+    header_value = expectations.get("expected_header")
+    if not isinstance(header_value, list) or not all(
+        isinstance(value, str) for value in header_value
+    ):
+        raise ValueError(
+            "expected_shape required_extract expectations.expected_header must be a list of strings"
+        )
+
+    evidence = validate_csv_product(
+        product_path,
+        CSVShapeExpectation(
+            minimum_data_rows=_optional_int(expectations, "minimum_data_rows"),
+            expected_column_count=_optional_int(expectations, "expected_column_count"),
+            expected_header=tuple(header_value),
+        ),
+        display_path=_required_string(product, "display_path"),
+    )
+    _write_json(evidence.to_dict(), output_path)
+    _write_json(
+        {
+            "status": evidence.status.value,
+            "validation": "required_extract",
+            "product": product_path.as_posix(),
+            "evidence": output_path.as_posix(),
+        },
+        None,
+    )
+    return 0 if evidence.passed else 1
+
+
 def _cmd_assemble_manifest(args: argparse.Namespace) -> int:
     source = _read_yaml_mapping(args.input)
     manifest = assemble_manifest(ManifestAssemblyInput(**source))
@@ -634,6 +681,29 @@ def _read_yaml_mapping(path: Path) -> dict[str, Any]:
     if not isinstance(loaded, dict):
         raise ValueError(f"YAML input must be a mapping: {path}")
     return loaded
+
+
+def _required_mapping(source: dict[str, Any], key: str) -> dict[str, Any]:
+    value = source.get(key)
+    if not isinstance(value, dict):
+        raise ValueError(f"expected_shape required_extract {key} must be a mapping")
+    return value
+
+
+def _required_string(source: dict[str, Any], key: str) -> str:
+    value = source.get(key)
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"expected_shape required_extract {key} must be a non-empty string")
+    return value
+
+
+def _optional_int(source: dict[str, Any], key: str) -> int | None:
+    value = source.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, int):
+        raise ValueError(f"expected_shape required_extract {key} must be an integer")
+    return value
 
 
 def _write_json(payload: object, output: Path | None) -> None:

@@ -158,6 +158,65 @@ def test_cli_validate_csv_returns_nonzero_for_failed_shape(tmp_path: Path, capsy
     assert any(check["name"] == "data_row_count" for check in evidence["checks"])
 
 
+def test_cli_validate_required_writes_configured_validation_evidence(
+    tmp_path: Path, capsys
+) -> None:  # type: ignore[no-untyped-def]
+    run_root = tmp_path / "runs" / "demo_001"
+    product = run_root / "provenance" / "products" / "extracted" / "required.csv"
+    product.parent.mkdir(parents=True)
+    product.write_text("logical_group,example,value\ndirC,ex1.dat,42\n", encoding="utf-8")
+    shape_config = tmp_path / "expected_shape.required_extract.yaml"
+    shape_config.write_text(
+        yaml.safe_dump(
+            {
+                "product": {
+                    "relative_path": "provenance/products/extracted/required.csv",
+                    "display_path": "products/extracted/required.csv",
+                },
+                "expectations": {
+                    "expected_header": ["logical_group", "example", "value"],
+                    "expected_column_count": 3,
+                    "minimum_data_rows": 1,
+                },
+                "evidence": {"output_path": "provenance/validations/required_extract.json"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert (
+        main(
+            [
+                "validate-required",
+                "--shape-config",
+                str(shape_config),
+                "--run-id",
+                "demo_001",
+                "--workspace-root",
+                str(tmp_path),
+            ]
+        )
+        == 0
+    )
+
+    summary = json.loads(capsys.readouterr().out)
+    evidence_path = run_root / "provenance" / "validations" / "required_extract.json"
+    evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+    assert summary["status"] == "pass"
+    assert summary["evidence"] == evidence_path.as_posix()
+    assert evidence["path"] == "products/extracted/required.csv"
+    assert evidence["status"] == "pass"
+    assert evidence["data_rows"] == 1
+    assert {check["name"] for check in evidence["checks"]} == {
+        "exists",
+        "is_file",
+        "non_empty",
+        "minimum_data_row_count",
+        "column_count",
+        "header",
+    }
+
+
 def test_cli_assembles_and_smoke_validates_manifest(tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
     input_yaml = tmp_path / "manifest-input.yaml"
     manifest_path = tmp_path / "manifest.yaml"
