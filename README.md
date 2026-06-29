@@ -14,6 +14,12 @@ This repository demonstrates a **provenance-first MVP** for an engineering data 
 
 The MVP is intended to run locally on Ubuntu/WSL and serve as a template for later adaptation to RHEL HPC login nodes and LSF-managed compute execution.
 
+## Pre-MVP Baseline Workflow
+
+The diagram below captures the current simulation/data workflow before adding the provenance-first MVP wrapper. It is the baseline the MVP should preserve and instrument, not replace.
+
+![Pre-MVP baseline simulation workflow](docs/current-sim-model.png)
+
 ## MVP Boundary
 
 In scope:
