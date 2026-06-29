@@ -38,7 +38,7 @@
 - [x] 5.2 Implement required extraction to produce `provenance/products/extracted/required.csv` from raw outputs.
 - [x] 5.3 Implement ad hoc extraction to produce `provenance/products/extracted/ad_hoc.csv` from raw outputs.
 - [x] 5.4 Implement minimal report generation to produce `summary.xlsx`, `chart.png`, and `briefing.pptx` under `provenance/products/reports/` while keeping generated products out of Git.
-- [ ] 5.5 Capture per-stage logs under `provenance/logs/` and make stage status/return codes available to the manifest.
+- [x] 5.5 Capture per-stage logs under `provenance/logs/` and make stage status/return codes available to the manifest.
 
 ## 6. Manifest And Validation
 

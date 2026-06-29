@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import time
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, NoReturn, Sequence
 
@@ -147,6 +149,7 @@ def _build_parser() -> argparse.ArgumentParser:
     build_reports.add_argument("--run-id", required=True)
     build_reports.add_argument("--workspace-root", type=Path, default=Path("."))
     build_reports.add_argument("--output", type=Path, help="optional report inventory JSON path")
+    build_reports.add_argument("--stage-output", type=Path, help="optional stage JSON output path")
     build_reports.set_defaults(func=_cmd_build_reports)
 
     inventory = subparsers.add_parser("inventory", help="inventory files under a root")
@@ -297,9 +300,77 @@ def _cmd_extract_ad_hoc(args: argparse.Namespace) -> int:
 
 
 def _cmd_build_reports(args: argparse.Namespace) -> int:
+    started_at = time.time()
     records = build_report_product_evidence(run_id=args.run_id, workspace_root=args.workspace_root)
+    finished_at = time.time()
     _write_json(list(records), args.output)
+    if args.stage_output is not None:
+        _write_report_stage_evidence(
+            run_id=args.run_id,
+            workspace_root=args.workspace_root,
+            output=args.stage_output,
+            products=records,
+            started_at=started_at,
+            finished_at=finished_at,
+        )
     return 0
+
+
+def _write_report_stage_evidence(
+    *,
+    run_id: str,
+    workspace_root: Path,
+    output: Path,
+    products: Sequence[dict[str, str | int | None]],
+    started_at: float,
+    finished_at: float,
+) -> None:
+    root = workspace_root.expanduser().resolve()
+    provenance_root = root / "runs" / run_id / "provenance"
+    log_root = provenance_root / "logs"
+    log_root.mkdir(parents=True, exist_ok=True)
+    stdout_log = log_root / "build_reports.stdout.log"
+    stderr_log = log_root / "build_reports.stderr.log"
+    stdout_log.write_text("Generated report products.\n", encoding="utf-8")
+    stderr_log.write_text("", encoding="utf-8")
+    run_root = root / "runs" / run_id
+    payload = {
+        "name": "build_reports",
+        "command": "make build-reports",
+        "working_directory": ".",
+        "logs": {
+            "stdout": stdout_log.relative_to(root).as_posix(),
+            "stderr": stderr_log.relative_to(root).as_posix(),
+        },
+        "started_at": _format_epoch_timestamp(started_at),
+        "finished_at": _format_epoch_timestamp(finished_at),
+        "duration_seconds": round(finished_at - started_at, 6),
+        "status": "pass",
+        "return_code": 0,
+        "controlled_scripts": [],
+        "inputs": [
+            _report_stage_artifact(run_root, Path("provenance/products/extracted/required.csv")),
+            _report_stage_artifact(run_root, Path("provenance/products/extracted/ad_hoc.csv")),
+        ],
+        "outputs": list(products),
+    }
+    _write_json(payload, output)
+
+
+def _report_stage_artifact(run_root: Path, relative_path: Path) -> dict[str, str | bool | None]:
+    return {
+        "relative_path": relative_path.as_posix(),
+        "exists": (run_root / relative_path).exists(),
+        "sim_area": None,
+        "logical_group": None,
+        "role": "extracted_product",
+        "sha256": None,
+        "hash_status": None,
+    }
+
+
+def _format_epoch_timestamp(value: float) -> str:
+    return datetime.fromtimestamp(value, UTC).isoformat().replace("+00:00", "Z")
 
 
 def _cmd_inventory(args: argparse.Namespace) -> int:

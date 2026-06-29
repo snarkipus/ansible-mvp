@@ -326,6 +326,10 @@ def test_run_synthetic_simulation_writes_raw_output_and_stage_evidence(
     assert result.return_code == 0
     assert result.working_directory == "runs/demo_007/sim-run-root"
     assert result.stdout_log == "runs/demo_007/provenance/logs/run_simulation.stdout.log"
+    assert result.stderr_log == "runs/demo_007/provenance/logs/run_simulation.stderr.log"
+    assert result.started_at.endswith("Z")
+    assert result.finished_at.endswith("Z")
+    assert result.duration_seconds >= 0
     output = result.outputs[0]
     assert output.relative_path == "sim-run-root/lists/dirC/sim-out.dat"
     assert output.sim_area == "lists"
@@ -390,6 +394,11 @@ def test_required_extraction_writes_derived_csv_outside_sim_run_root_and_stage_e
     assert result.return_code == 0
     assert result.working_directory == "controlled-source-demo"
     assert result.stdout_log == "runs/demo_008/provenance/logs/extract_required.stdout.log"
+    assert result.to_dict()["return_code"] == 0
+    assert result.to_dict()["logs"] == {
+        "stdout": "runs/demo_008/provenance/logs/extract_required.stdout.log",
+        "stderr": "runs/demo_008/provenance/logs/extract_required.stderr.log",
+    }
     assert result.inputs[0].relative_path == "sim-run-root/lists/dirC/sim-out.dat"
     assert result.inputs[0].role == "raw_output"
     assert result.inputs[0].sha256 is not None
@@ -435,6 +444,11 @@ def test_cli_extract_required_writes_stage_json(tmp_path: Path) -> None:
 
     evidence = json.loads(output_path.read_text(encoding="utf-8"))
     assert evidence["name"] == "extract_required"
+    assert evidence["status"] == "pass"
+    assert evidence["return_code"] == 0
+    assert evidence["started_at"].endswith("Z")
+    assert evidence["finished_at"].endswith("Z")
+    assert evidence["logs"]["stdout"] == "runs/demo_009/provenance/logs/extract_required.stdout.log"
     assert evidence["outputs"][0]["relative_path"] == "provenance/products/extracted/required.csv"
     assert (tmp_path / "runs/demo_009/provenance/products/extracted/required.csv").is_file()
 

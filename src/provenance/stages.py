@@ -6,6 +6,7 @@ import os
 import shlex
 import subprocess
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -50,8 +51,12 @@ class StageResult:
     working_directory: str
     stdout_log: str
     stderr_log: str
+    started_at: str
+    finished_at: str
+    duration_seconds: float
     status: str
     return_code: int
+    controlled_scripts: tuple[str, ...]
     inputs: tuple[StageArtifact, ...]
     outputs: tuple[StageArtifact, ...]
 
@@ -66,8 +71,12 @@ class StageResult:
                 "stdout": self.stdout_log,
                 "stderr": self.stderr_log,
             },
+            "started_at": self.started_at,
+            "finished_at": self.finished_at,
+            "duration_seconds": self.duration_seconds,
             "status": self.status,
             "return_code": self.return_code,
+            "controlled_scripts": list(self.controlled_scripts),
             "inputs": [artifact.to_dict() for artifact in self.inputs],
             "outputs": [artifact.to_dict() for artifact in self.outputs],
         }
@@ -121,6 +130,7 @@ def run_synthetic_simulation(
         stdout_log.open("w", encoding="utf-8") as stdout_obj,
         stderr_log.open("w", encoding="utf-8") as stderr_obj,
     ):
+        started_at = _utc_now()
         completed = subprocess.run(  # noqa: S603 - command is validated by preflight/config
             argv,
             cwd=working_directory,
@@ -130,6 +140,7 @@ def run_synthetic_simulation(
             check=False,
             text=True,
         )
+        finished_at = _utc_now()
 
     inputs = tuple(
         _artifact(_stage_artifact_path(root, run_root, input_path), input_path, include_hash=False)
@@ -149,8 +160,12 @@ def run_synthetic_simulation(
         working_directory=working_directory.relative_to(root).as_posix(),
         stdout_log=stdout_log.relative_to(root).as_posix(),
         stderr_log=stderr_log.relative_to(root).as_posix(),
+        started_at=_format_timestamp(started_at),
+        finished_at=_format_timestamp(finished_at),
+        duration_seconds=_duration_seconds(started_at, finished_at),
         status=status,
         return_code=completed.returncode,
+        controlled_scripts=_stage_controlled_scripts(stage),
         inputs=inputs,
         outputs=outputs,
     )
@@ -241,6 +256,7 @@ def _run_configured_stage(
         stdout_log.open("w", encoding="utf-8") as stdout_obj,
         stderr_log.open("w", encoding="utf-8") as stderr_obj,
     ):
+        started_at = _utc_now()
         completed = subprocess.run(  # noqa: S603 - command is validated by preflight/config
             argv,
             cwd=working_directory,
@@ -250,6 +266,7 @@ def _run_configured_stage(
             check=False,
             text=True,
         )
+        finished_at = _utc_now()
 
     inputs = tuple(
         _artifact(_stage_artifact_path(root, run_root, input_path), input_path, include_hash=True)
@@ -271,10 +288,33 @@ def _run_configured_stage(
         else working_directory.as_posix(),
         stdout_log=stdout_log.relative_to(root).as_posix(),
         stderr_log=stderr_log.relative_to(root).as_posix(),
+        started_at=_format_timestamp(started_at),
+        finished_at=_format_timestamp(finished_at),
+        duration_seconds=_duration_seconds(started_at, finished_at),
         status=status,
         return_code=completed.returncode,
+        controlled_scripts=_stage_controlled_scripts(stage),
         inputs=inputs,
         outputs=outputs,
+    )
+
+
+def _utc_now() -> datetime:
+    return datetime.now(UTC)
+
+
+def _format_timestamp(value: datetime) -> str:
+    return value.isoformat().replace("+00:00", "Z")
+
+
+def _duration_seconds(started_at: datetime, finished_at: datetime) -> float:
+    return round((finished_at - started_at).total_seconds(), 6)
+
+
+def _stage_controlled_scripts(stage: dict[str, Any]) -> tuple[str, ...]:
+    value = stage.get("expected_controlled_scripts", [])
+    return _string_list(
+        value, f"stages.{stage.get('name', '<unknown>')}.expected_controlled_scripts"
     )
 
 

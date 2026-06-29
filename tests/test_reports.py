@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from openpyxl import load_workbook
@@ -66,3 +67,36 @@ def test_cli_build_reports_writes_inventory_evidence(tmp_path: Path) -> None:
     assert (provenance_root / "products" / "reports" / "summary.xlsx").exists()
     assert (provenance_root / "products" / "reports" / "chart.png").exists()
     assert (provenance_root / "products" / "reports" / "briefing.pptx").exists()
+
+
+def test_cli_build_reports_writes_stage_status_evidence(tmp_path: Path) -> None:
+    run_id = "cli_report_stage_demo"
+    provenance_root = _write_extracted_products(tmp_path, run_id)
+    inventory_output = provenance_root / "inventories" / "report_products.json"
+    stage_output = provenance_root / "logs" / "build_reports.stage.json"
+
+    assert (
+        main(
+            [
+                "build-reports",
+                "--run-id",
+                run_id,
+                "--workspace-root",
+                str(tmp_path),
+                "--output",
+                str(inventory_output),
+                "--stage-output",
+                str(stage_output),
+            ]
+        )
+        == 0
+    )
+
+    evidence = json.loads(stage_output.read_text(encoding="utf-8"))
+    assert evidence["name"] == "build_reports"
+    assert evidence["status"] == "pass"
+    assert evidence["return_code"] == 0
+    assert evidence["started_at"].endswith("Z")
+    assert evidence["logs"]["stdout"] == f"runs/{run_id}/provenance/logs/build_reports.stdout.log"
+    assert evidence["outputs"][0]["relative_path"].startswith("provenance/products/reports/")
+    assert (provenance_root / "logs" / "build_reports.stdout.log").is_file()
