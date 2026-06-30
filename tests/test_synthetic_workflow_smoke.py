@@ -61,6 +61,35 @@ def test_clean_synthetic_workflow_smoke_generates_manifest_reports_and_validatio
     assert {"summary.xlsx", "chart.png", "briefing.pptx"}.issubset(report_names)
     assert any(record["status"] == "pass" for record in manifest["validations"])
     assert yaml.safe_load(required_validation.read_text(encoding="utf-8"))["status"] == "pass"
+    configured_stage_names = [stage["name"] for stage in _load_run_config(wrapper)["stages"]]
+    manifest_stage_names = [stage["name"] for stage in manifest["stages"]]
+    assert manifest_stage_names == configured_stage_names
+    support_stage_names = {
+        "preflight",
+        "prepare_workspace",
+        "materialize_inputs",
+        "materialize_procs",
+        "submit_mock_lsf",
+        "inventory_pre",
+        "inventory_post",
+        "validate",
+        "manifest",
+        "manifest_smoke",
+    }
+    for stage_name in support_stage_names:
+        evidence_path = provenance_root / "logs" / f"{stage_name}.stage.json"
+        assert evidence_path.is_file()
+        evidence = yaml.safe_load(evidence_path.read_text(encoding="utf-8"))
+        assert evidence["name"] == stage_name
+        assert evidence["status"] == "pass"
+        assert evidence["command"]
+        assert evidence["cwd"] == evidence["working_directory"]
+        assert evidence["evidence_path"] == f"runs/{run_id}/provenance/logs/{stage_name}.stage.json"
+        assert evidence["started_at"]
+        assert evidence["finished_at"]
+        assert evidence["return_code"] == 0
+        assert "inputs" in evidence
+        assert "outputs" in evidence
 
 
 def test_preflight_smoke_rejects_dirty_controlled_source(tmp_path: Path) -> None:

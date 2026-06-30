@@ -110,8 +110,10 @@ Important sections to check:
 - `controlled_source_gate`: preflight checks that passed before execution.
 - `inputs` and `runtime_scripts`: where materialized inputs/scripts came from and
   how they were copied into the run.
-- `stages`: commands, working directories, statuses, return codes, logs, controlled
-  scripts, inputs, and outputs.
+- `stages`: first-class attempt evidence for every configured workflow stage,
+  including support/orchestration steps; records commands, working directories,
+  statuses, return codes, log paths, evidence paths, timings, controlled scripts,
+  inputs, and outputs.
 - `raw_simulation_outputs`: raw artifacts such as `sim-run-root/lists/dirC/sim-out.dat`.
 - `derived_products`: extracted CSVs and report files, with product area, role,
   producing stage, size, mtime, and SHA-256 hash.

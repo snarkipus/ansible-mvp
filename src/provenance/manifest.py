@@ -190,7 +190,7 @@ def assemble_run_manifest(
         controlled_scripts=controlled_scripts_config,
     )
 
-    stages = _read_json_records(logs_root, "*.stage.json")
+    stages = _ordered_stage_records(_read_json_records(logs_root, "*.stage.json"), config)
     logs = _log_records(root, logs_root)
     validations = _read_json_records(validations_root, "*.json")
 
@@ -303,6 +303,18 @@ def _read_json_records(directory: Path, pattern: str) -> list[dict[str, Any]]:
     return [_read_json_mapping(path) for path in sorted(directory.glob(pattern))]
 
 
+def _ordered_stage_records(
+    records: Sequence[dict[str, Any]], config: Mapping[str, object]
+) -> list[dict[str, Any]]:
+    configured_names = [
+        str(stage.get("name"))
+        for stage in _required_list(config, "stages")
+        if isinstance(stage, Mapping) and isinstance(stage.get("name"), str)
+    ]
+    order = {name: index for index, name in enumerate(configured_names)}
+    return sorted(records, key=lambda record: order.get(str(record.get("name")), len(order)))
+
+
 def _missing_for_key_path(manifest: Mapping[str, object], key_path: str) -> list[str]:
     current_values: list[object] = [manifest]
     display_paths: list[str] = [""]
@@ -403,6 +415,13 @@ def _required_mapping(source: Mapping[str, object], key: str) -> dict[str, Any]:
     value = source.get(key)
     if not isinstance(value, dict):
         raise ValueError(f"{key} must be a mapping")
+    return value
+
+
+def _required_list(source: Mapping[str, object], key: str) -> list[Any]:
+    value = source.get(key)
+    if not isinstance(value, list):
+        raise ValueError(f"{key} must be a list")
     return value
 
 

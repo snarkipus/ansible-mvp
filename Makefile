@@ -25,16 +25,19 @@ bootstrap-controlled-source: ## Bootstrap or verify the sibling controlled sourc
 preflight: ## Run the Git-controlled source entrance gate before workflow stages.
 	uv run provenance preflight \
 		--config configs/run.synthetic.yaml \
+		--run-id "$(RUN_ID)" \
 		--wrapper-repo . \
 		--controlled-source-repo "$(CONTROLLED_SOURCE_REPO)" \
 		--controlled-source-ref "$(CONTROLLED_SOURCE_REF)" \
-		--output "$(PROVENANCE_ROOT)/preflight.json"
+		--output "$(PROVENANCE_ROOT)/preflight.json" \
+		--stage-output "$(PROVENANCE_ROOT)/logs/preflight.stage.json"
 
 prepare-workspace: ## Prepare runs/$(RUN_ID)/sim-run-root and provenance sidecar directories.
 	uv run provenance prepare-workspace \
 		--config configs/run.synthetic.yaml \
 		--run-id "$(RUN_ID)" \
-		--workspace-root .
+		--workspace-root . \
+		--stage-output "$(PROVENANCE_ROOT)/logs/prepare_workspace.stage.json"
 
 materialize-inputs: ## Copy controlled fixture inputs into the run workspace.
 	uv run provenance materialize-inputs \
@@ -43,7 +46,8 @@ materialize-inputs: ## Copy controlled fixture inputs into the run workspace.
 		--workspace-root . \
 		--controlled-source-repo "$(CONTROLLED_SOURCE_REPO)" \
 		--controlled-source-ref "$(CONTROLLED_SOURCE_REF)" \
-		--output "$(PROVENANCE_ROOT)/inventories/materialized_inputs.json"
+		--output "$(PROVENANCE_ROOT)/inventories/materialized_inputs.json" \
+		--stage-output "$(PROVENANCE_ROOT)/logs/materialize_inputs.stage.json"
 
 materialize-procs: ## Materialize sim-run-root/procs/run-script.sh from controlled source.
 	uv run provenance materialize-procs \
@@ -52,14 +56,16 @@ materialize-procs: ## Materialize sim-run-root/procs/run-script.sh from controll
 		--workspace-root . \
 		--controlled-source-repo "$(CONTROLLED_SOURCE_REPO)" \
 		--controlled-source-ref "$(CONTROLLED_SOURCE_REF)" \
-		--output "$(PROVENANCE_ROOT)/inventories/materialized_runtime_scripts.json"
+		--output "$(PROVENANCE_ROOT)/inventories/materialized_runtime_scripts.json" \
+		--stage-output "$(PROVENANCE_ROOT)/logs/materialize_procs.stage.json"
 
 submit-mock-lsf: ## Write mock LSF scheduler metadata without requiring real LSF tools.
 	uv run provenance submit-mock-lsf \
 		--config configs/run.synthetic.yaml \
 		--run-id "$(RUN_ID)" \
 		--workspace-root . \
-		--output "$(PROVENANCE_ROOT)/scheduler/submission.yaml"
+		--output "$(PROVENANCE_ROOT)/scheduler/submission.yaml" \
+		--stage-output "$(PROVENANCE_ROOT)/logs/submit_mock_lsf.stage.json"
 
 run-simulation: ## Execute the controlled synthetic simulation stage.
 	uv run provenance run-simulation \
@@ -97,20 +103,23 @@ inventory-pre: ## Inventory pre-run controlled inputs and runtime scripts.
 		--run-id "$(RUN_ID)" \
 		--workspace-root . \
 		--inputs-output "$(PROVENANCE_ROOT)/inventories/pre_run_inputs.json" \
-		--scripts-output "$(PROVENANCE_ROOT)/inventories/pre_run_controlled_scripts.json"
+		--scripts-output "$(PROVENANCE_ROOT)/inventories/pre_run_controlled_scripts.json" \
+		--stage-output "$(PROVENANCE_ROOT)/logs/inventory_pre.stage.json"
 
 inventory-post: ## Inventory post-run raw outputs and derived products.
 	uv run provenance inventory-post \
 		--run-id "$(RUN_ID)" \
 		--workspace-root . \
 		--raw-output "$(PROVENANCE_ROOT)/inventories/post_run_raw_outputs.json" \
-		--products-output "$(PROVENANCE_ROOT)/inventories/post_run_derived_products.json"
+		--products-output "$(PROVENANCE_ROOT)/inventories/post_run_derived_products.json" \
+		--stage-output "$(PROVENANCE_ROOT)/logs/inventory_post.stage.json"
 
 validate: ## Validate extracted products.
 	uv run provenance validate-required \
 		--shape-config configs/expected_shape.required_extract.yaml \
 		--run-id "$(RUN_ID)" \
-		--workspace-root .
+		--workspace-root . \
+		--stage-output "$(PROVENANCE_ROOT)/logs/validate.stage.json"
 
 manifest: ## Assemble runs/$(RUN_ID)/provenance/manifest.yaml.
 	uv run provenance assemble-run-manifest \
@@ -119,12 +128,19 @@ manifest: ## Assemble runs/$(RUN_ID)/provenance/manifest.yaml.
 		--workspace-root . \
 		--controlled-source-repo "$(CONTROLLED_SOURCE_REPO)" \
 		--controlled-source-ref "$(CONTROLLED_SOURCE_REF)" \
-		--output "$(PROVENANCE_ROOT)/manifest.yaml"
+		--output "$(PROVENANCE_ROOT)/manifest.yaml" \
+		--stage-output "$(PROVENANCE_ROOT)/logs/manifest.stage.json"
 
 manifest-smoke: ## Smoke-validate required manifest sections and key values.
 	uv run provenance smoke-manifest \
 		"$(PROVENANCE_ROOT)/manifest.yaml" \
-		--output "$(PROVENANCE_ROOT)/validations/manifest_smoke.json"
+		--output "$(PROVENANCE_ROOT)/validations/manifest_smoke.json" \
+		--config configs/run.synthetic.yaml \
+		--run-id "$(RUN_ID)" \
+		--workspace-root . \
+		--controlled-source-repo "$(CONTROLLED_SOURCE_REPO)" \
+		--controlled-source-ref "$(CONTROLLED_SOURCE_REF)" \
+		--stage-output "$(PROVENANCE_ROOT)/logs/manifest_smoke.stage.json"
 
 format: ## Format Python source and tests with Ruff.
 	uv run ruff format $(PYTHON_PACKAGE) tests

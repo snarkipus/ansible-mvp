@@ -41,6 +41,7 @@ from provenance.stages import (
     run_ad_hoc_extraction,
     run_required_extraction,
     run_synthetic_simulation,
+    stage_attempt_evidence,
 )
 from provenance.validation import CSVShapeExpectation, validate_csv_product
 from provenance.workspace import materialize_inputs, materialize_runtime_scripts, prepare_workspace
@@ -81,10 +82,12 @@ def _build_parser() -> argparse.ArgumentParser:
 
     preflight = subparsers.add_parser("preflight", help="run controlled-source preflight gate")
     preflight.add_argument("--config", type=Path, default=Path("configs/run.synthetic.yaml"))
+    preflight.add_argument("--run-id", required=True)
     preflight.add_argument("--wrapper-repo", type=Path, default=Path("."))
     preflight.add_argument("--controlled-source-repo", type=Path, required=True)
     preflight.add_argument("--controlled-source-ref", required=True)
     preflight.add_argument("--output", type=Path, help="optional JSON output path")
+    preflight.add_argument("--stage-output", type=Path, help="optional stage JSON output path")
     preflight.set_defaults(func=_cmd_preflight)
 
     workspace = subparsers.add_parser(
@@ -94,6 +97,7 @@ def _build_parser() -> argparse.ArgumentParser:
     workspace.add_argument("--run-id", required=True)
     workspace.add_argument("--workspace-root", type=Path, default=Path("."))
     workspace.add_argument("--output", type=Path, help="optional JSON output path")
+    workspace.add_argument("--stage-output", type=Path, help="optional stage JSON output path")
     workspace.set_defaults(func=_cmd_prepare_workspace)
 
     materialize_inputs_parser = subparsers.add_parser(
@@ -113,6 +117,7 @@ def _build_parser() -> argparse.ArgumentParser:
     mock_lsf.add_argument("--run-id", required=True)
     mock_lsf.add_argument("--workspace-root", type=Path, default=Path("."))
     mock_lsf.add_argument("--output", type=Path, help="optional scheduler YAML output path")
+    mock_lsf.add_argument("--stage-output", type=Path, help="optional stage JSON output path")
     mock_lsf.set_defaults(func=_cmd_submit_mock_lsf)
 
     run_simulation = subparsers.add_parser(
@@ -167,6 +172,7 @@ def _build_parser() -> argparse.ArgumentParser:
     inventory_pre.add_argument("--workspace-root", type=Path, default=Path("."))
     inventory_pre.add_argument("--inputs-output", type=Path)
     inventory_pre.add_argument("--scripts-output", type=Path)
+    inventory_pre.add_argument("--stage-output", type=Path, help="optional stage JSON output path")
     inventory_pre.set_defaults(func=_cmd_inventory_pre)
 
     inventory_post = subparsers.add_parser(
@@ -176,6 +182,7 @@ def _build_parser() -> argparse.ArgumentParser:
     inventory_post.add_argument("--workspace-root", type=Path, default=Path("."))
     inventory_post.add_argument("--raw-output", type=Path)
     inventory_post.add_argument("--products-output", type=Path)
+    inventory_post.add_argument("--stage-output", type=Path, help="optional stage JSON output path")
     inventory_post.set_defaults(func=_cmd_inventory_post)
 
     validate_csv = subparsers.add_parser("validate-csv", help="validate CSV shape")
@@ -194,6 +201,9 @@ def _build_parser() -> argparse.ArgumentParser:
     validate_required.add_argument("--shape-config", type=Path, required=True)
     validate_required.add_argument("--run-id", required=True)
     validate_required.add_argument("--workspace-root", type=Path, default=Path("."))
+    validate_required.add_argument(
+        "--stage-output", type=Path, help="optional stage JSON output path"
+    )
     validate_required.set_defaults(func=_cmd_validate_required)
 
     assemble = subparsers.add_parser("assemble-manifest", help="assemble manifest YAML")
@@ -212,11 +222,18 @@ def _build_parser() -> argparse.ArgumentParser:
     assemble_run.add_argument(
         "--output", type=Path, required=True, help="manifest YAML output path"
     )
+    assemble_run.add_argument("--stage-output", type=Path, help="optional stage JSON output path")
     assemble_run.set_defaults(func=_cmd_assemble_run_manifest)
 
     smoke = subparsers.add_parser("smoke-manifest", help="smoke-validate manifest sections")
     smoke.add_argument("manifest", type=Path)
     smoke.add_argument("--output", type=Path, help="optional JSON output path")
+    smoke.add_argument("--config", type=Path, default=Path("configs/run.synthetic.yaml"))
+    smoke.add_argument("--run-id")
+    smoke.add_argument("--workspace-root", type=Path, default=Path("."))
+    smoke.add_argument("--controlled-source-repo", type=Path)
+    smoke.add_argument("--controlled-source-ref")
+    smoke.add_argument("--stage-output", type=Path, help="optional stage JSON output path")
     smoke.set_defaults(func=_cmd_smoke_manifest)
 
     return parser
@@ -252,27 +269,42 @@ def _cmd_git_state(args: argparse.Namespace) -> int:
 
 
 def _cmd_preflight(args: argparse.Namespace) -> int:
+    started_at = _utc_now()
     result = run_preflight(
         config_path=args.config,
         wrapper_repo=args.wrapper_repo,
         controlled_source_repo=args.controlled_source_repo,
         controlled_source_ref=args.controlled_source_ref,
     )
+    finished_at = _utc_now()
     _write_json(result.to_dict(), args.output)
+    _write_support_stage_attempt(
+        args,
+        "preflight",
+        started_at=started_at,
+        finished_at=finished_at,
+        controlled_source_repo=args.controlled_source_repo,
+    )
     return 0
 
 
 def _cmd_prepare_workspace(args: argparse.Namespace) -> int:
+    started_at = _utc_now()
     result = prepare_workspace(
         config_path=args.config,
         run_id=args.run_id,
         workspace_root=args.workspace_root,
     )
+    finished_at = _utc_now()
     _write_json(result.to_dict(), args.output)
+    _write_support_stage_attempt(
+        args, "prepare_workspace", started_at=started_at, finished_at=finished_at
+    )
     return 0
 
 
 def _cmd_materialize_inputs(args: argparse.Namespace) -> int:
+    started_at = _utc_now()
     result = materialize_inputs(
         config_path=args.config,
         run_id=args.run_id,
@@ -280,11 +312,20 @@ def _cmd_materialize_inputs(args: argparse.Namespace) -> int:
         controlled_source_ref=args.controlled_source_ref,
         workspace_root=args.workspace_root,
     )
+    finished_at = _utc_now()
     _write_json(result.to_dict(), args.output)
+    _write_support_stage_attempt(
+        args,
+        "materialize_inputs",
+        started_at=started_at,
+        finished_at=finished_at,
+        controlled_source_repo=args.controlled_source_repo,
+    )
     return 0
 
 
 def _cmd_materialize_procs(args: argparse.Namespace) -> int:
+    started_at = _utc_now()
     result = materialize_runtime_scripts(
         config_path=args.config,
         run_id=args.run_id,
@@ -292,18 +333,31 @@ def _cmd_materialize_procs(args: argparse.Namespace) -> int:
         controlled_source_ref=args.controlled_source_ref,
         workspace_root=args.workspace_root,
     )
+    finished_at = _utc_now()
     _write_json(result.to_dict(), args.output)
+    _write_support_stage_attempt(
+        args,
+        "materialize_procs",
+        started_at=started_at,
+        finished_at=finished_at,
+        controlled_source_repo=args.controlled_source_repo,
+    )
     return 0
 
 
 def _cmd_submit_mock_lsf(args: argparse.Namespace) -> int:
+    started_at = _utc_now()
     payload = write_mock_lsf_metadata(
         config_path=args.config,
         run_id=args.run_id,
         workspace_root=args.workspace_root,
         output=args.output,
     )
+    finished_at = _utc_now()
     _write_json(payload, None)
+    _write_support_stage_attempt(
+        args, "submit_mock_lsf", started_at=started_at, finished_at=finished_at
+    )
     return 0
 
 
@@ -314,7 +368,9 @@ def _cmd_run_simulation(args: argparse.Namespace) -> int:
         workspace_root=args.workspace_root,
         controlled_source_repo=args.controlled_source_repo,
     )
-    _write_json(result.to_dict(), args.output)
+    _write_json(
+        _with_evidence_path(result.to_dict(), args.output, args.workspace_root), args.output
+    )
     return 0 if result.status == "pass" else 1
 
 
@@ -325,7 +381,9 @@ def _cmd_extract_required(args: argparse.Namespace) -> int:
         workspace_root=args.workspace_root,
         controlled_source_repo=args.controlled_source_repo,
     )
-    _write_json(result.to_dict(), args.output)
+    _write_json(
+        _with_evidence_path(result.to_dict(), args.output, args.workspace_root), args.output
+    )
     return 0 if result.status == "pass" else 1
 
 
@@ -336,7 +394,9 @@ def _cmd_extract_ad_hoc(args: argparse.Namespace) -> int:
         workspace_root=args.workspace_root,
         controlled_source_repo=args.controlled_source_repo,
     )
-    _write_json(result.to_dict(), args.output)
+    _write_json(
+        _with_evidence_path(result.to_dict(), args.output, args.workspace_root), args.output
+    )
     return 0 if result.status == "pass" else 1
 
 
@@ -379,6 +439,7 @@ def _write_report_stage_evidence(
         "name": "build_reports",
         "command": "make build-reports",
         "working_directory": ".",
+        "cwd": ".",
         "logs": {
             "stdout": stdout_log.relative_to(root).as_posix(),
             "stderr": stderr_log.relative_to(root).as_posix(),
@@ -394,6 +455,9 @@ def _write_report_stage_evidence(
             _report_stage_artifact(run_root, Path("provenance/products/extracted/ad_hoc.csv")),
         ],
         "outputs": list(products),
+        "evidence_path": output.relative_to(root).as_posix()
+        if output.is_absolute() and output.is_relative_to(root)
+        else output.as_posix(),
     }
     _write_json(payload, output)
 
@@ -414,6 +478,49 @@ def _format_epoch_timestamp(value: float) -> str:
     return datetime.fromtimestamp(value, UTC).isoformat().replace("+00:00", "Z")
 
 
+def _utc_now() -> datetime:
+    return datetime.now(UTC)
+
+
+def _write_support_stage_attempt(
+    args: argparse.Namespace,
+    stage_name: str,
+    *,
+    started_at: datetime,
+    finished_at: datetime,
+    controlled_source_repo: Path | None = None,
+) -> None:
+    output = getattr(args, "stage_output", None)
+    if output is None:
+        return
+    payload = stage_attempt_evidence(
+        config_path=getattr(args, "config", Path("configs/run.synthetic.yaml")),
+        run_id=args.run_id,
+        stage_name=stage_name,
+        workspace_root=getattr(args, "workspace_root", Path(".")),
+        controlled_source_repo=controlled_source_repo,
+        started_at=started_at,
+        finished_at=finished_at,
+        evidence_path=output,
+    )
+    _write_json(payload, output)
+
+
+def _with_evidence_path(
+    payload: dict[str, Any], output: Path | None, workspace_root: Path
+) -> dict[str, Any]:
+    if output is None:
+        return payload
+    root = workspace_root.expanduser().resolve()
+    resolved = output if output.is_absolute() else root / output
+    payload["evidence_path"] = (
+        resolved.relative_to(root).as_posix()
+        if resolved.is_relative_to(root)
+        else resolved.as_posix()
+    )
+    return payload
+
+
 def _cmd_inventory(args: argparse.Namespace) -> int:
     records = inventory_files(args.root)
     if args.with_hashes:
@@ -426,6 +533,7 @@ def _cmd_inventory(args: argparse.Namespace) -> int:
 
 
 def _cmd_inventory_pre(args: argparse.Namespace) -> int:
+    started_at = _utc_now()
     root = args.workspace_root.expanduser().resolve()
     run_root = root / "runs" / args.run_id
     sim_root = run_root / "sim-run-root"
@@ -457,10 +565,15 @@ def _cmd_inventory_pre(args: argparse.Namespace) -> int:
         },
         None,
     )
+    finished_at = _utc_now()
+    _write_support_stage_attempt(
+        args, "inventory_pre", started_at=started_at, finished_at=finished_at
+    )
     return 0
 
 
 def _cmd_inventory_post(args: argparse.Namespace) -> int:
+    started_at = _utc_now()
     root = args.workspace_root.expanduser().resolve()
     run_root = root / "runs" / args.run_id
     sim_root = run_root / "sim-run-root"
@@ -484,6 +597,10 @@ def _cmd_inventory_post(args: argparse.Namespace) -> int:
             "derived_product_count": len(products),
         },
         None,
+    )
+    finished_at = _utc_now()
+    _write_support_stage_attempt(
+        args, "inventory_post", started_at=started_at, finished_at=finished_at
     )
     return 0
 
@@ -584,6 +701,7 @@ def _add_materialization_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--controlled-source-repo", type=Path, required=True)
     parser.add_argument("--controlled-source-ref", required=True)
     parser.add_argument("--output", type=Path, help="optional JSON output path")
+    parser.add_argument("--stage-output", type=Path, help="optional stage JSON output path")
 
 
 def _cmd_validate_csv(args: argparse.Namespace) -> int:
@@ -599,6 +717,7 @@ def _cmd_validate_csv(args: argparse.Namespace) -> int:
 
 
 def _cmd_validate_required(args: argparse.Namespace) -> int:
+    started_at = _utc_now()
     shape = _read_yaml_mapping(args.shape_config)
     run_root = args.workspace_root.expanduser().resolve() / "runs" / args.run_id
     product = _required_mapping(shape, "product")
@@ -634,6 +753,11 @@ def _cmd_validate_required(args: argparse.Namespace) -> int:
         },
         None,
     )
+    finished_at = _utc_now()
+    if evidence.passed:
+        _write_support_stage_attempt(
+            args, "validate", started_at=started_at, finished_at=finished_at
+        )
     return 0 if evidence.passed else 1
 
 
@@ -646,6 +770,23 @@ def _cmd_assemble_manifest(args: argparse.Namespace) -> int:
 
 
 def _cmd_assemble_run_manifest(args: argparse.Namespace) -> int:
+    started_at = _utc_now()
+    manifest = assemble_run_manifest(
+        config_path=args.config,
+        run_id=args.run_id,
+        workspace_root=args.workspace_root,
+        controlled_source_repo=args.controlled_source_repo,
+        controlled_source_ref=args.controlled_source_ref,
+    )
+    write_manifest(manifest, args.output)
+    finished_at = _utc_now()
+    _write_support_stage_attempt(
+        args,
+        "manifest",
+        started_at=started_at,
+        finished_at=finished_at,
+        controlled_source_repo=args.controlled_source_repo,
+    )
     manifest = assemble_run_manifest(
         config_path=args.config,
         run_id=args.run_id,
@@ -659,6 +800,7 @@ def _cmd_assemble_run_manifest(args: argparse.Namespace) -> int:
 
 
 def _cmd_smoke_manifest(args: argparse.Namespace) -> int:
+    started_at = _utc_now()
     manifest = _read_yaml_mapping(args.manifest)
     missing = missing_required_sections(manifest)
     missing_key_values = missing_required_key_values(manifest)
@@ -669,7 +811,26 @@ def _cmd_smoke_manifest(args: argparse.Namespace) -> int:
         "missing_required_key_values": list(missing_key_values),
     }
     _write_json(payload, args.output)
-    return 0 if not missing and not missing_key_values else 1
+    finished_at = _utc_now()
+    passed = not missing and not missing_key_values
+    if passed and args.run_id is not None and args.stage_output is not None:
+        _write_support_stage_attempt(
+            args,
+            "manifest_smoke",
+            started_at=started_at,
+            finished_at=finished_at,
+            controlled_source_repo=args.controlled_source_repo,
+        )
+        if args.controlled_source_repo is not None and args.controlled_source_ref is not None:
+            refreshed = assemble_run_manifest(
+                config_path=args.config,
+                run_id=args.run_id,
+                workspace_root=args.workspace_root,
+                controlled_source_repo=args.controlled_source_repo,
+                controlled_source_ref=args.controlled_source_ref,
+            )
+            write_manifest(refreshed, args.manifest)
+    return 0 if passed else 1
 
 
 def _tracked_file_payload(repo: Path, relative_path: str) -> dict[str, Any]:

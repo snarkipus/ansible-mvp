@@ -42,6 +42,11 @@ def test_run_config_declares_controlled_scripts_and_stage_commands() -> None:
         "extract_required",
         "extract_ad_hoc",
         "build_reports",
+        "inventory_pre",
+        "inventory_post",
+        "validate",
+        "manifest",
+        "manifest_smoke",
     ]
 
     script_names = set(controlled_scripts)

@@ -223,6 +223,66 @@ stages:
       - provenance/products/reports/summary.xlsx
       - provenance/products/reports/chart.png
       - provenance/products/reports/briefing.pptx
+  - name: inventory_pre
+    command: make inventory-pre
+    working_directory: wrapper_repo
+    command_kind: wrapper_make_target
+    approved_command_path: Makefile
+    inputs:
+      - provenance/inventories/materialized_inputs.json
+      - provenance/inventories/materialized_runtime_scripts.json
+    outputs:
+      - provenance/inventories/pre_run_inputs.json
+      - provenance/inventories/pre_run_controlled_scripts.json
+  - name: inventory_post
+    command: make inventory-post
+    working_directory: wrapper_repo
+    command_kind: wrapper_make_target
+    approved_command_path: Makefile
+    inputs:
+      - sim-run-root/lists/dirC/sim-out.dat
+      - provenance/products/extracted/required.csv
+      - provenance/products/extracted/ad_hoc.csv
+      - provenance/products/reports/summary.xlsx
+      - provenance/products/reports/chart.png
+      - provenance/products/reports/briefing.pptx
+    outputs:
+      - provenance/inventories/post_run_raw_outputs.json
+      - provenance/inventories/post_run_derived_products.json
+  - name: validate
+    command: make validate
+    working_directory: wrapper_repo
+    command_kind: wrapper_make_target
+    approved_command_path: Makefile
+    inputs:
+      - provenance/products/extracted/required.csv
+      - configs/expected_shape.required_extract.yaml
+    outputs:
+      - provenance/validations/required_extract.json
+  - name: manifest
+    command: make manifest
+    working_directory: wrapper_repo
+    command_kind: wrapper_make_target
+    approved_command_path: Makefile
+    inputs:
+      - provenance/preflight.json
+      - provenance/scheduler/submission.yaml
+      - provenance/inventories/pre_run_inputs.json
+      - provenance/inventories/pre_run_controlled_scripts.json
+      - provenance/inventories/post_run_raw_outputs.json
+      - provenance/inventories/post_run_derived_products.json
+      - provenance/validations/required_extract.json
+    outputs:
+      - provenance/manifest.yaml
+  - name: manifest_smoke
+    command: make manifest-smoke
+    working_directory: wrapper_repo
+    command_kind: wrapper_make_target
+    approved_command_path: Makefile
+    inputs:
+      - provenance/manifest.yaml
+    outputs:
+      - provenance/validations/manifest_smoke.json
 validations:
   required_extract:
     config_path: configs/expected_shape.required_extract.yaml

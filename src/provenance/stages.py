@@ -59,6 +59,7 @@ class StageResult:
     controlled_scripts: tuple[str, ...]
     inputs: tuple[StageArtifact, ...]
     outputs: tuple[StageArtifact, ...]
+    evidence_path: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON/YAML friendly representation."""
@@ -67,6 +68,7 @@ class StageResult:
             "name": self.name,
             "command": self.command,
             "working_directory": self.working_directory,
+            "cwd": self.working_directory,
             "logs": {
                 "stdout": self.stdout_log,
                 "stderr": self.stderr_log,
@@ -79,7 +81,100 @@ class StageResult:
             "controlled_scripts": list(self.controlled_scripts),
             "inputs": [artifact.to_dict() for artifact in self.inputs],
             "outputs": [artifact.to_dict() for artifact in self.outputs],
+            "evidence_path": self.evidence_path,
         }
+
+
+def stage_attempt_evidence(
+    *,
+    config_path: Path | str,
+    run_id: str,
+    stage_name: str,
+    workspace_root: Path | str = Path("."),
+    controlled_source_repo: Path | str | None = None,
+    started_at: datetime | None = None,
+    finished_at: datetime | None = None,
+    status: str = "pass",
+    return_code: int | None = 0,
+    evidence_path: Path | str | None = None,
+) -> dict[str, Any]:
+    """Build first-class evidence for a non-executing orchestration stage."""
+
+    if not run_id:
+        raise ValueError("run_id must be non-empty")
+
+    root = Path(workspace_root).expanduser().resolve()
+    config = _read_yaml_mapping(Path(config_path))
+    layout = _mapping(config.get("layout"), "layout")
+    stage = _stage_by_name(config, stage_name)
+    run_root = root / _format_layout_path(layout, "run_root", run_id)
+    sim_run_root = root / _format_layout_path(layout, "sim_run_root", run_id)
+    controlled_root = (
+        Path(controlled_source_repo).expanduser().resolve()
+        if controlled_source_repo is not None
+        else root
+    )
+    provenance_root = root / _format_layout_path(layout, "provenance_root", run_id)
+    log_root = provenance_root / "logs"
+    log_root.mkdir(parents=True, exist_ok=True)
+
+    start = started_at or _utc_now()
+    finish = finished_at or _utc_now()
+    stdout_log = log_root / f"{stage_name}.stdout.log"
+    stderr_log = log_root / f"{stage_name}.stderr.log"
+    if not stdout_log.exists():
+        stdout_log.write_text(
+            f"Recorded successful orchestration stage: {stage_name}\n", encoding="utf-8"
+        )
+    if not stderr_log.exists():
+        stderr_log.write_text("", encoding="utf-8")
+
+    working_directory = _working_directory(
+        root,
+        sim_run_root,
+        controlled_root,
+        _non_empty_string(stage.get("working_directory"), f"stages.{stage_name}.working_directory"),
+    )
+    working_directory_value = (
+        working_directory.relative_to(root).as_posix()
+        if working_directory.is_relative_to(root)
+        else working_directory.as_posix()
+    )
+    inputs = tuple(
+        _artifact(_stage_artifact_path(root, run_root, input_path), input_path, include_hash=True)
+        for input_path in _stage_paths(stage.get("inputs"), "inputs", stage_name=stage_name)
+    )
+    outputs = tuple(
+        _artifact(_stage_artifact_path(root, run_root, output_path), output_path, include_hash=True)
+        for output_path in _stage_paths(stage.get("outputs"), "outputs", stage_name=stage_name)
+    )
+    evidence_value: str | None = None
+    if evidence_path is not None:
+        resolved_evidence = Path(evidence_path)
+        if not resolved_evidence.is_absolute():
+            resolved_evidence = root / resolved_evidence
+        evidence_value = (
+            resolved_evidence.relative_to(root).as_posix()
+            if resolved_evidence.is_relative_to(root)
+            else resolved_evidence.as_posix()
+        )
+
+    return StageResult(
+        name=stage_name,
+        command=_non_empty_string(stage.get("command"), f"stages.{stage_name}.command"),
+        working_directory=working_directory_value,
+        stdout_log=stdout_log.relative_to(root).as_posix(),
+        stderr_log=stderr_log.relative_to(root).as_posix(),
+        started_at=_format_timestamp(start),
+        finished_at=_format_timestamp(finish),
+        duration_seconds=_duration_seconds(start, finish),
+        status=status,
+        return_code=return_code or 0,
+        controlled_scripts=_stage_controlled_scripts(stage),
+        inputs=inputs,
+        outputs=outputs,
+        evidence_path=evidence_value,
+    ).to_dict()
 
 
 def run_synthetic_simulation(
