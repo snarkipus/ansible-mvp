@@ -10,11 +10,13 @@ from pathlib import Path
 from typing import Any
 
 from openpyxl import Workbook
+from openpyxl.worksheet.worksheet import Worksheet
 
 from provenance.hashing import hash_artifact
 from provenance.inventory import InventoryRecord, inventory_files, with_sha256
 
 REPORT_FILENAMES = ("summary.xlsx", "chart.png", "briefing.pptx")
+RgbColor = tuple[int, int, int]
 
 
 def build_report_products(
@@ -84,6 +86,8 @@ def _write_summary_workbook(
 ) -> None:
     workbook = Workbook()
     summary = workbook.active
+    if summary is None:
+        raise RuntimeError("new workbook did not create an active summary sheet")
     summary.title = "summary"
     summary.append(("metric", "value"))
     summary.append(("required_rows", len(required_rows)))
@@ -96,13 +100,13 @@ def _write_summary_workbook(
     workbook.save(path)
 
 
-def _append_rows(sheet: object, rows: list[dict[str, str]]) -> None:
+def _append_rows(sheet: Worksheet, rows: list[dict[str, str]]) -> None:
     if not rows:
         return
     headers = list(rows[0])
-    sheet.append(headers)  # type: ignore[attr-defined]
+    sheet.append(headers)
     for row in rows:
-        sheet.append([row.get(header, "") for header in headers])  # type: ignore[attr-defined]
+        sheet.append([row.get(header, "") for header in headers])
 
 
 def _write_chart(path: Path, ad_hoc_rows: list[dict[str, str]]) -> None:
@@ -142,10 +146,10 @@ def _bar_chart_png(values: list[int]) -> bytes:
     width = 320
     height = 180
     margin = 24
-    background = (255, 255, 255)
-    axis = (80, 80, 80)
-    bar = (79, 129, 189)
-    pixels = [[background for _x in range(width)] for _y in range(height)]
+    background: RgbColor = (255, 255, 255)
+    axis: RgbColor = (80, 80, 80)
+    bar: RgbColor = (79, 129, 189)
+    pixels: list[list[RgbColor]] = [[background for _x in range(width)] for _y in range(height)]
     for x_coord in range(margin, width - margin):
         pixels[height - margin][x_coord] = axis
     for y_coord in range(margin, height - margin + 1):

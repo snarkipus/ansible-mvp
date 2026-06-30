@@ -1,9 +1,9 @@
 ## 1. Project Scaffold
 
 - [x] 1.1 Add root `.gitignore` entries for generated run outputs, generated reports, Python caches, and local virtual environments without ignoring source/config files needed for the MVP.
-- [x] 1.2 Add `pyproject.toml` managed by `uv` with the MVP runtime, test, lint, format, and type-check dependencies: PyYAML, pytest, ruff, mypy, openpyxl, python-pptx, and any minimal chart dependency selected for `chart.png`.
+- [x] 1.2 Add `pyproject.toml` managed by `uv` with the MVP runtime, test, lint, format, and type-check dependencies: PyYAML, pytest, ruff, basedpyright, openpyxl, python-pptx, and any minimal chart dependency selected for `chart.png`.
 - [x] 1.3 Create the repository structure for `ansible/`, `configs/`, `scripts/`, `src/provenance/`, `templates/`, `tests/`, and `runs/.gitkeep`.
-- [x] 1.4 Add `ruff` and `mypy` configuration for typed Python helpers, including package discovery for `src/provenance` and test-friendly type-check settings.
+- [x] 1.4 Add `ruff` and `basedpyright` configuration for typed Python helpers, including package discovery for `src/provenance` and test-friendly type-check settings.
 - [x] 1.5 Add a Makefile with documented targets for bootstrap, preflight, workspace preparation, materialization, mock scheduler, simulation, extraction, reporting, inventory, validation, manifest generation, format, lint, typecheck, test, check, and clean operations.
 
 ## 2. Controlled Source Demo Bootstrap
@@ -52,7 +52,7 @@
 
 - [x] 7.1 Add unit tests for Git state capture, tracked script detection, wrapper controlled path detection, SHA-256 hashing, inventory metadata, CSV shape validation, and manifest smoke validation.
 - [x] 7.2 Add smoke tests for a clean synthetic run, dirty controlled source failure, dirty wrapper controlled path failure, untracked script failure, uncontrolled stage command failure, missing ref failure, absent real LSF tools, manifest generation, exact report product generation, product separation from `sim-run-root/`, and required CSV validation.
-- [x] 7.3 Add a quality gate target that runs `uv run ruff format --check`, `uv run ruff check`, `uv run mypy`, and `uv run pytest` in that order.
+- [x] 7.3 Add a quality gate target that runs `uv run ruff format --check`, `uv run ruff check`, `uv run basedpyright`, and `uv run pytest` in that order.
 - [x] 7.4 Add `docs/how_to_use_this_mvp.md` for junior engineers, covering prerequisites, setup, bootstrap, run commands, expected outputs, manifest inspection, extension points, controlled-script rules, validation/report additions, troubleshooting, and what not to change.
 - [x] 7.5 Update README quickstart notes if implementation details differ from the existing documented command shape, and link to the handoff guide.
 - [x] 7.6 Run the relevant test suite, quality gate, and a local clean synthetic workflow command, then record any known limitations or deferred follow-up work.

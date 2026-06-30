@@ -12,14 +12,14 @@ The repository began with concept documentation and OpenCode/OpenSpec tooling, n
 
 The synthetic implementation runs locally on Ubuntu/WSL and models two Git repositories: this provenance wrapper repo and a sibling `../controlled-source-demo` repo containing controlled synthetic scripts and fixture inputs. On Windows hosts, operators should run commands inside Ubuntu/WSL rather than native PowerShell or CMD because the MVP assumes Linux tooling, Unix-style paths, `bash`, `make`, and Ansible. Generated run artifacts remain outside Git under `runs/{run_id}/`.
 
-Python helper code is provenance-critical: it decides what is controlled, what was run, what was produced, what passed validation, and what the manifest says. The scaffold therefore uses explicit Python project tooling from the start: `uv` for environment/dependency execution, `ruff` for linting/formatting, `mypy` for static type checking, and `pytest` for tests.
+Python helper code is provenance-critical: it decides what is controlled, what was run, what was produced, what passed validation, and what the manifest says. The scaffold therefore uses explicit Python project tooling from the start: `uv` for environment/dependency execution, `ruff` for linting/formatting, `basedpyright` for static type checking, and `pytest` for tests.
 
 ## Goals / Non-Goals
 
 **Goals:**
 
 - Provide a runnable local scaffold using Ansible as the outer harness, Make as the stage runner, and Python helpers for provenance operations.
-- Provide Python tooling with repeatable `uv` commands, `ruff` lint/format checks, and `mypy` type checks for the helper package.
+- Provide Python tooling with repeatable `uv` commands, `ruff` lint/format checks, and `basedpyright` type checks for the helper package.
 - Bootstrap a clean, tagged `../controlled-source-demo` repository for synthetic controlled scripts and inputs.
 - Enforce a Git-controlled source gate before running workflow stages.
 - Preserve the simulation contract under `runs/{run_id}/sim-run-root/` while writing evidence and derived products under `runs/{run_id}/provenance/`.
@@ -332,7 +332,7 @@ It runs, in order:
 ```text
 uv run ruff format --check src/provenance tests
 uv run ruff check src/provenance tests
-uv run mypy
+uv run basedpyright
 uv run pytest
 ```
 
@@ -385,9 +385,9 @@ bd lint --json
 
    Alternative considered: adopt JSON Schema or Pydantic immediately. That adds tooling and modeling cost before the run story is stable.
 
-7. Use `uv`, `ruff`, and `mypy` as first-class project tooling.
+7. Use `uv`, `ruff`, and `basedpyright` as first-class project tooling.
 
-   The scaffold includes `pyproject.toml` and `uv.lock`. Make targets call Python tools through `uv run`, and the quality gate order is `ruff format --check`, `ruff check`, `mypy`, then `pytest`.
+   The scaffold includes `pyproject.toml` and `uv.lock`. Make targets call Python tools through `uv run`, and the quality gate order is `ruff format --check`, `ruff check`, `basedpyright`, then `pytest`.
 
    Alternative considered: use bare `pip` and untyped Python. That would reduce setup files but make provenance helpers easier to drift and harder to verify as the manifest contract grows.
 
@@ -462,7 +462,7 @@ The MVP intentionally defers production concerns until the provenance spine is p
 This change introduced a new scaffold rather than migrating existing executable code.
 
 1. Add ignored generated-output paths before creating run artifacts.
-2. Add `pyproject.toml`, `uv` dependency metadata, `ruff`, `mypy`, configuration, scripts, Python helpers, Ansible playbook, Makefile, tests, and handoff guide.
+2. Add `pyproject.toml`, `uv` dependency metadata, `ruff`, `basedpyright`, configuration, scripts, Python helpers, Ansible playbook, Makefile, tests, and handoff guide.
 3. Bootstrap `../controlled-source-demo` with tag `controlled-source-demo-v0.1.0`.
 4. Verify the clean run path and failure tests locally.
 5. Leave generated run output untracked.

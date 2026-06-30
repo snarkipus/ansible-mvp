@@ -132,8 +132,8 @@ format: ## Format Python source and tests with Ruff.
 lint: ## Check Python source and tests with Ruff.
 	uv run ruff check $(PYTHON_PACKAGE) tests
 
-typecheck: ## Type-check provenance helpers with mypy.
-	uv run mypy
+typecheck: ## Type-check provenance helpers with basedpyright.
+	uv run basedpyright
 
 test: ## Run pytest.
 	uv run pytest
@@ -141,11 +141,11 @@ test: ## Run pytest.
 check: ## Run the quality gate: format check, lint, typecheck, then tests.
 	uv run ruff format --check $(PYTHON_PACKAGE) tests
 	uv run ruff check $(PYTHON_PACKAGE) tests
-	uv run mypy
+	uv run basedpyright
 	uv run pytest
 
 clean: ## Remove local caches and generated run outputs.
-	rm -rf .pytest_cache .ruff_cache .mypy_cache runs/*
+	rm -rf .pytest_cache .ruff_cache .basedpyright_cache runs/*
 	touch runs/.gitkeep
 
 .PHONY: _not-implemented

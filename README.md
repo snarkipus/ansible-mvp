@@ -196,7 +196,7 @@ Expected local tools:
 - Perl
 - `uv`
 
-Python dependencies are managed through `uv` from `pyproject.toml`/`uv.lock`. The MVP uses PyYAML, openpyxl, python-pptx, pytest, ruff, and mypy for runtime helpers, reporting, tests, linting, formatting, and type checks.
+Python dependencies are managed through `uv` from `pyproject.toml`/`uv.lock`. The MVP uses PyYAML, openpyxl, python-pptx, pytest, ruff, and basedpyright for runtime helpers, reporting, tests, linting, formatting, and type checks.
 
 ## Quickstart
 

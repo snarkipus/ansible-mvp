@@ -22,6 +22,6 @@ def test_check_target_runs_quality_gate_commands_in_documented_order() -> None:
     assert _target_recipe("check") == [
         "uv run ruff format --check $(PYTHON_PACKAGE) tests",
         "uv run ruff check $(PYTHON_PACKAGE) tests",
-        "uv run mypy",
+        "uv run basedpyright",
         "uv run pytest",
     ]

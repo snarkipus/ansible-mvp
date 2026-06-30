@@ -16,7 +16,7 @@ provenance = "provenance.cli:_entrypoint"
 
 [dependency-groups]
 dev = [
-    "mypy>=1.10",
+    "basedpyright>=1.29",
     "pytest>=8.2",
     "ruff>=0.5",
 ]
@@ -42,18 +42,8 @@ select = ["E", "F", "I", "W"]
 [tool.ruff.lint.isort]
 known-first-party = ["provenance"]
 
-[tool.mypy]
-python_version = "3.11"
-files = ["src/provenance"]
-pretty = true
-show_error_codes = true
-ignore_missing_imports = false
-
-[[tool.mypy.overrides]]
-module = [
-    "matplotlib.*",
-    "openpyxl.*",
-    "pptx.*",
-    "yaml.*",
-]
-ignore_missing_imports = true
+[tool.basedpyright]
+include = ["src/provenance"]
+pythonVersion = "3.11"
+typeCheckingMode = "basic"
+reportMissingTypeStubs = false

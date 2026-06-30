@@ -65,8 +65,8 @@ The system SHALL use SHA-256 for scripts, configuration, small inputs, extracted
 - **THEN** its manifest or inventory record includes a SHA-256 hash value
 
 ### Requirement: Python quality gates are available
-The system SHALL provide repeatable Python quality checks using `uv`, `ruff`, `mypy`, and `pytest`.
+The system SHALL provide repeatable Python quality checks using `uv`, `ruff`, `basedpyright`, and `pytest`.
 
 #### Scenario: Python quality gate succeeds
 - **WHEN** the repository is checked with the documented quality target
-- **THEN** `ruff format --check`, `ruff check`, `mypy`, and `pytest` run through `uv` and complete successfully
+- **THEN** `ruff format --check`, `ruff check`, `basedpyright`, and `pytest` run through `uv` and complete successfully

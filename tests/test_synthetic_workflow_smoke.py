@@ -133,7 +133,7 @@ def _prepare_wrapper_checkout(tmp_path: Path) -> Path:
         ignore=shutil.ignore_patterns(
             ".git",
             ".beads",
-            ".mypy_cache",
+            ".basedpyright_cache",
             ".pytest_cache",
             ".ruff_cache",
             ".venv",
