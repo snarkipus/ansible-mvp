@@ -198,6 +198,8 @@ Expected local tools:
 
 Python dependencies are managed through `uv` from `pyproject.toml`/`uv.lock`. The MVP uses PyYAML, openpyxl, python-pptx, pytest, ruff, and basedpyright for runtime helpers, reporting, tests, linting, formatting, and type checks.
 
+For IDE/editor setup, use the Python environment created by `uv` and enable Ruff plus basedpyright-compatible type checking. See [`docs/how_to_use_this_mvp.md`](docs/how_to_use_this_mvp.md) for practical IDE notes.
+
 ## Quickstart
 
 For a step-by-step operator handoff, troubleshooting notes, and safe extension rules, see [`docs/how_to_use_this_mvp.md`](docs/how_to_use_this_mvp.md).

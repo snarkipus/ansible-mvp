@@ -29,6 +29,30 @@ workspace/
 └── controlled-source-demo/   # bootstrapped Git repo with synthetic inputs/scripts
 ```
 
+## IDE and Editor Setup
+
+Use an IDE/editor from inside the same Ubuntu/WSL environment used to run the
+workflow. Point the editor at the Python environment managed by `uv`; do not use a
+random global interpreter if you expect imports, linting, and type checking to
+match `make check`.
+
+Recommended editor integrations:
+
+- Ruff for formatting and lint diagnostics.
+- basedpyright, Pyright, or Pylance-compatible type checking that reads the
+  `[tool.basedpyright]` configuration in `pyproject.toml`.
+- The repository root as the workspace folder so `src/provenance` package
+  discovery and test paths match the command-line tools.
+
+The command-line source of truth remains:
+
+```bash
+make check
+```
+
+If IDE diagnostics disagree with `make check`, trust `make check` first and then
+adjust the editor interpreter/environment settings.
+
 ## Setup and Bootstrap
 
 From this repository root inside Ubuntu/WSL, create or verify the sibling
