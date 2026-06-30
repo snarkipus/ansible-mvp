@@ -36,6 +36,17 @@ The system SHALL record each major stage with command, working directory, timest
 - **WHEN** a controlled extraction script creates an extracted CSV
 - **THEN** the manifest stage record links the extraction command, controlled script identity, source raw outputs, log paths, and derived CSV product
 
+### Requirement: Manifest captures every configured stage attempt
+The system SHALL emit first-class stage-attempt evidence for every configured workflow stage, including support and orchestration stages that do not execute controlled simulation or extraction scripts directly.
+
+#### Scenario: Support stage attempt is recorded
+- **WHEN** a clean synthetic run completes a support stage such as `preflight`, `prepare_workspace`, `materialize_inputs`, `materialize_procs`, `submit_mock_lsf`, `inventory_pre`, `inventory_post`, `validate`, `manifest`, or `manifest_smoke`
+- **THEN** the run writes stage-attempt evidence with stage name, status, command, working directory or cwd, configured inputs, configured outputs, evidence path, timing, and return code where applicable
+
+#### Scenario: Manifest includes configured stage order
+- **WHEN** manifest assembly reads stage-attempt evidence for a clean synthetic run
+- **THEN** the manifest `stages` section includes every configured stage in the configured order, including support stages and executable simulation/extraction/report stages
+
 ### Requirement: Manifest distinguishes raw outputs from derived products
 The system SHALL represent raw simulation outputs separately from generated analytical/reporting products.
 
