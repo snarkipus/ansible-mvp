@@ -234,10 +234,11 @@ For code changes, run the full quality gate before closing work:
 make check
 ```
 
-For OpenSpec reconciliation and bead hygiene, run:
+`openspec` and `bd` are maintainer workflow tools. They are not required to run
+the MVP demo. Use them only when changing project specs or beads:
 
 ```bash
-openspec validate scaffold-runnable-provenance-mvp --type change --strict --json
+openspec validate --specs --strict --json
 bd lint --json
 ```
 
@@ -253,11 +254,11 @@ ansible-playbook ansible/playbooks/run_synthetic_workflow.yml \
   -e run_id=final_verification_001 \
   -e controlled_source_repo=../controlled-source-demo \
   -e controlled_source_ref=controlled-source-demo-v0.1.0
-openspec validate scaffold-runnable-provenance-mvp --type change --strict --json
-bd lint --json
 ```
 
 The bootstrap, quality gate, and clean synthetic workflow completed successfully.
+Maintainer-only OpenSpec and bead hygiene checks were also run during development;
+they are not required for ordinary demo execution.
 Generated verification outputs are intentionally ignored under `runs/`.
 
 Known deferred limitations are tracked as follow-up beads rather than implemented in

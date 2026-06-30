@@ -249,10 +249,12 @@ Run the local quality gate before closing code changes:
 make check
 ```
 
-Reconcile the active OpenSpec change and bead hygiene with:
+`openspec` and `bd` are maintainer workflow tools, not demo runtime
+requirements. They are only needed when changing project specs or beads. Maintainers
+can validate OpenSpec specs and bead hygiene with:
 
 ```bash
-openspec validate scaffold-runnable-provenance-mvp --type change --strict --json
+openspec validate --specs --strict --json
 bd lint --json
 ```
 
