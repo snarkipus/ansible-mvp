@@ -70,6 +70,17 @@ The system SHALL reject stage command definitions that execute uncontrolled loca
 - **WHEN** a configured stage command points to a script outside approved tracked repository-relative paths
 - **THEN** preflight fails and identifies the uncontrolled command path
 
+### Requirement: Stage commands use simple command structures
+The system SHALL restrict configured stage commands to simple executable-plus-arguments forms and SHALL reject shell interpreter or shell metacharacter constructs instead of attempting to parse arbitrary shell programs.
+
+#### Scenario: Stage command uses shell interpreter escape
+- **WHEN** a configured stage command uses `sh`, `bash`, or another shell interpreter as the executable
+- **THEN** preflight fails before workflow execution
+
+#### Scenario: Stage command uses shell metacharacters
+- **WHEN** a configured stage command includes shell constructs such as pipes, redirects, command chaining, subshell syntax, or backticks
+- **THEN** preflight fails before workflow execution
+
 ### Requirement: Stage declarations are validated before execution
 The system SHALL validate configured stage declarations before execution, including stage name, command, working directory, expected controlled scripts, and expected inputs or outputs when configured.
 
