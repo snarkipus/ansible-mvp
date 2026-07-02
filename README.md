@@ -222,6 +222,9 @@ Run these commands from a Linux shell, such as Ubuntu/WSL on Windows. If you are
 
 Bootstrap the synthetic controlled source repository:
 
+This is demo bootstrap only. It creates or verifies the local synthetic sibling
+repo; it is not an ordinary production factory stage.
+
 ```bash
 make bootstrap-controlled-source
 ```

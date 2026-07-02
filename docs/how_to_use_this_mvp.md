@@ -66,6 +66,9 @@ This command is intentionally strict. It creates `../controlled-source-demo` whe
 missing, or verifies that an existing repo is clean, compatible, has the expected
 tracked files, and has tag `controlled-source-demo-v0.1.0`.
 
+Treat this as local demo bootstrap only. A production-shaped factory run should
+resolve and verify existing controlled sources, not create upstream source repos.
+
 ## Run the Synthetic Workflow
 
 Use the documented Ansible command shape:
