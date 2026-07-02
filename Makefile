@@ -19,9 +19,11 @@ PROVENANCE_ROOT := $(RUN_ROOT)/provenance
 help: ## Show documented Make targets.
 	@awk 'BEGIN {FS = ":.*## "; printf "Usage: make <target> [RUN_ID=%s]\n\nTargets:\n", "$(RUN_ID)"} /^[a-zA-Z0-9_-]+:.*## / {printf "  %-28s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
+# Bootstrap: local demo setup outside ordinary production-shaped runs.
 bootstrap-controlled-source: ## Bootstrap or verify the sibling controlled source demo repository.
 	./scripts/bootstrap_controlled_source.sh "$(CONTROLLED_SOURCE_REPO)"
 
+# Admission: fail fast before the run can start.
 preflight: ## Run the Git-controlled source entrance gate before workflow stages.
 	uv run provenance preflight \
 		--config configs/run.synthetic.yaml \
@@ -32,6 +34,7 @@ preflight: ## Run the Git-controlled source entrance gate before workflow stages
 		--output "$(PROVENANCE_ROOT)/preflight.json" \
 		--stage-output "$(PROVENANCE_ROOT)/logs/preflight.stage.json"
 
+# Setup: create the run workspace and materialize runtime plumbing.
 prepare-workspace: ## Prepare runs/$(RUN_ID)/sim-run-root and provenance sidecar directories.
 	uv run provenance prepare-workspace \
 		--config configs/run.synthetic.yaml \
@@ -59,6 +62,7 @@ materialize-procs: ## Materialize sim-run-root/procs/run-script.sh from controll
 		--output "$(PROVENANCE_ROOT)/inventories/materialized_runtime_scripts.json" \
 		--stage-output "$(PROVENANCE_ROOT)/logs/materialize_procs.stage.json"
 
+# Factory: produce or transform consumed and delivered domain artifacts.
 submit-mock-lsf: ## Write mock LSF scheduler metadata without requiring real LSF tools.
 	uv run provenance submit-mock-lsf \
 		--config configs/run.synthetic.yaml \
@@ -98,6 +102,14 @@ build-reports: ## Generate summary.xlsx, chart.png, and briefing.pptx derived re
 		--output "$(PROVENANCE_ROOT)/inventories/report_products.json" \
 		--stage-output "$(PROVENANCE_ROOT)/logs/build_reports.stage.json"
 
+validate: ## Validate extracted products.
+	uv run provenance validate-required \
+		--shape-config configs/expected_shape.required_extract.yaml \
+		--run-id "$(RUN_ID)" \
+		--workspace-root . \
+		--stage-output "$(PROVENANCE_ROOT)/logs/validate.stage.json"
+
+# Finalization: inventory outputs, assemble the manifest, and verify the receipt.
 inventory-pre: ## Inventory pre-run controlled inputs and runtime scripts.
 	uv run provenance inventory-pre \
 		--run-id "$(RUN_ID)" \
@@ -113,13 +125,6 @@ inventory-post: ## Inventory post-run raw outputs and derived products.
 		--raw-output "$(PROVENANCE_ROOT)/inventories/post_run_raw_outputs.json" \
 		--products-output "$(PROVENANCE_ROOT)/inventories/post_run_derived_products.json" \
 		--stage-output "$(PROVENANCE_ROOT)/logs/inventory_post.stage.json"
-
-validate: ## Validate extracted products.
-	uv run provenance validate-required \
-		--shape-config configs/expected_shape.required_extract.yaml \
-		--run-id "$(RUN_ID)" \
-		--workspace-root . \
-		--stage-output "$(PROVENANCE_ROOT)/logs/validate.stage.json"
 
 manifest: ## Assemble runs/$(RUN_ID)/provenance/manifest.yaml.
 	uv run provenance assemble-run-manifest \
@@ -142,6 +147,7 @@ manifest-smoke: ## Smoke-validate required manifest sections and key values.
 		--controlled-source-ref "$(CONTROLLED_SOURCE_REF)" \
 		--stage-output "$(PROVENANCE_ROOT)/logs/manifest_smoke.stage.json"
 
+# Developer quality targets.
 format: ## Format Python source and tests with Ruff.
 	uv run ruff format $(PYTHON_PACKAGE) tests
 
