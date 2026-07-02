@@ -40,28 +40,15 @@
 - If using OpenSpec CLI output, trust resolved paths from `openspec status --change <name> --json`; do not assume fixed change/artifact paths beyond what the CLI reports.
 
 ## Implementation Workflow
-- Drive implementation from beads, not OpenSpec apply: `bd ready --json`, inspect/claim one actionable bead, implement it, reconcile it with OpenSpec, then close it.
-- Keep commits incremental: commit after each completed bead task; when an epic is completed, close the epic and commit that closure separately if it changes tracked artifacts.
-- Before closing a bead, verify its acceptance/success criteria, update the corresponding OpenSpec task checkbox if implementation is complete, and surface any user decision needed.
-- Run the relevant quality gates before closing implementation beads. For Python/code changes this means `make check`, which includes `uv run ruff format --check`, `uv run ruff check`, `uv run basedpyright`, and `uv run pytest`; also run targeted checks when they better isolate the changed behavior.
-- Do not close or commit a bead with failing lint, type checks, tests, OpenSpec validation, or `bd lint --json` unless the failure is explicitly documented as an accepted blocker.
-- Use `/opsx-archive` only after beads are closed/reconciled and the implemented change is validated.
-
-## OpenSpec and Beads Sync
-- OpenSpec artifacts are the human-facing source of truth; beads are the agentic operating memory.
-- Before starting or closing implementation work, cross-check the relevant bead against the corresponding OpenSpec proposal/design/specs/tasks and keep them synchronized.
-- If implementation reveals a scope change, ambiguity, or mismatch, update or revise the OpenSpec artifact first, then update the bead metadata/dependencies to match.
-- Do not close a bead until its acceptance/success criteria have been reconciled against OpenSpec and any user-input findings have been surfaced.
-- Run `bd lint --json` after creating or bulk-updating beads so missing criteria do not drift from OpenSpec.
-
-## OpenSpec-to-Beads Lifecycle
-- Propose the change first: create the OpenSpec proposal, design, spec deltas, and task checklist before implementation begins.
-- Treat the OpenSpec task checklist as the implementation breakdown source of truth.
-- After the proposal is accepted, map each actionable OpenSpec task to one or more beads before editing code or docs.
-- Link mapped beads back to the proposal/umbrella bead with `discovered-from` dependencies, and add blocking dependencies so `bd ready --json` reflects the intended task order.
-- Implement from beads, not directly from the OpenSpec task file: claim one ready bead, make the smallest correct change, verify it, reconcile the related OpenSpec checkbox, close the bead, and commit the bead-sized result when appropriate.
-- Before closing the final implementation or validation bead, verify that beads cover every OpenSpec task and that each completed checkbox has a closed bead or an explicit documented rationale.
-- Archive the OpenSpec change only after implementation beads are closed, closure criteria are satisfied, quality gates pass, and the main specs have been updated by the archive flow.
+- Use OpenSpec for meaningful changes that affect workflow behavior, provenance contracts, architecture, or operator-facing docs. Small maintenance edits can be tracked directly in beads.
+- Treat OpenSpec as the human-facing what/why contract and beads as execution tracking. Keep them synchronized when scope, acceptance criteria, or implementation reality changes.
+- After an OpenSpec proposal is accepted, map its actionable tasks to beads before implementation. Group small related checklist items into one coherent bead when they are naturally one code or docs change.
+- Drive implementation from ready beads: claim one bead, make the smallest correct change, run targeted checks, reconcile related OpenSpec checkboxes, then close the bead.
+- Commit at useful review/recovery boundaries. Do not force a separate commit for every checkbox, validation step, or bookkeeping-only update unless it improves traceability.
+- Before final closure of an implementation change, verify OpenSpec task coverage: every completed checkbox should have a closed bead or an explicit documented rationale.
+- Run relevant quality gates before final closure. For Python/code changes this means `make check`; also run strict OpenSpec validation and `bd lint --json` for spec/bead changes.
+- Do not close or commit work with failing lint, type checks, tests, OpenSpec validation, or `bd lint --json` unless the failure is explicitly documented as an accepted blocker.
+- Archive OpenSpec changes last: implementation beads closed, closure criteria satisfied, quality gates passed, main specs synced, then move the change into `openspec/changes/archive/`.
 
 <!-- BEGIN BEADS INTEGRATION v:1 profile:full hash:0a1bbe8a -->
 
