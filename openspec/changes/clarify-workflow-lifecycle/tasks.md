@@ -1,6 +1,6 @@
 ## 1. Configuration and Evidence Model
 
-- [ ] 1.1 Add lifecycle metadata to each configured stage in `configs/run.synthetic.yaml` without renaming Make targets.
+- [x] 1.1 Add lifecycle metadata to each configured stage in `configs/run.synthetic.yaml` without renaming Make targets.
 - [ ] 1.2 Propagate `lifecycle_class`, `display_order`, and `operator_visible` into stage-attempt evidence for support and executable stages.
 - [ ] 1.3 Include lifecycle metadata in manifest `stages` records while preserving all existing stage evidence.
 

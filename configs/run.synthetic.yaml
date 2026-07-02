@@ -109,6 +109,9 @@ stage_defaults:
   log_directory: provenance/logs
 stages:
   - name: preflight
+    lifecycle_class: admission
+    display_order: 10
+    operator_visible: true
     command: make preflight
     working_directory: wrapper_repo
     command_kind: wrapper_make_target
@@ -121,6 +124,9 @@ stages:
     outputs:
       - provenance/preflight.json
   - name: prepare_workspace
+    lifecycle_class: setup
+    display_order: 20
+    operator_visible: false
     command: make prepare-workspace
     working_directory: wrapper_repo
     command_kind: wrapper_make_target
@@ -137,6 +143,9 @@ stages:
       - provenance/products/extracted
       - provenance/products/reports
   - name: materialize_inputs
+    lifecycle_class: setup
+    display_order: 30
+    operator_visible: false
     command: make materialize-inputs
     working_directory: wrapper_repo
     command_kind: wrapper_make_target
@@ -162,6 +171,9 @@ stages:
       - sim-run-root/input/dirC/ex2.dat
       - sim-run-root/input/dirC/ex3.dat
   - name: materialize_procs
+    lifecycle_class: setup
+    display_order: 40
+    operator_visible: false
     command: make materialize-procs
     working_directory: wrapper_repo
     command_kind: wrapper_make_target
@@ -171,6 +183,9 @@ stages:
     outputs:
       - sim-run-root/procs/run-script.sh
   - name: submit_mock_lsf
+    lifecycle_class: factory
+    display_order: 50
+    operator_visible: true
     command: make submit-mock-lsf
     working_directory: wrapper_repo
     command_kind: wrapper_make_target
@@ -178,6 +193,9 @@ stages:
     outputs:
       - provenance/scheduler/submission.yaml
   - name: run_simulation
+    lifecycle_class: factory
+    display_order: 60
+    operator_visible: true
     command: procs/run-script.sh
     working_directory: sim-run-root
     command_kind: materialized_controlled_script
@@ -190,6 +208,9 @@ stages:
     outputs:
       - sim-run-root/lists/dirC/sim-out.dat
   - name: extract_required
+    lifecycle_class: factory
+    display_order: 70
+    operator_visible: true
     command: scripts/extract_required.pl sim-run-root/lists/dirC/sim-out.dat provenance/products/extracted/required.csv
     working_directory: controlled_source_repo
     command_kind: controlled_source_script
@@ -201,6 +222,9 @@ stages:
     outputs:
       - provenance/products/extracted/required.csv
   - name: extract_ad_hoc
+    lifecycle_class: factory
+    display_order: 80
+    operator_visible: true
     command: scripts/ad_hoc_extract.py sim-run-root/lists/dirC/sim-out.dat provenance/products/extracted/ad_hoc.csv
     working_directory: controlled_source_repo
     command_kind: controlled_source_script
@@ -212,6 +236,9 @@ stages:
     outputs:
       - provenance/products/extracted/ad_hoc.csv
   - name: build_reports
+    lifecycle_class: factory
+    display_order: 90
+    operator_visible: true
     command: make build-reports
     working_directory: wrapper_repo
     command_kind: wrapper_make_target
@@ -224,6 +251,9 @@ stages:
       - provenance/products/reports/chart.png
       - provenance/products/reports/briefing.pptx
   - name: inventory_pre
+    lifecycle_class: finalization
+    display_order: 100
+    operator_visible: false
     command: make inventory-pre
     working_directory: wrapper_repo
     command_kind: wrapper_make_target
@@ -235,6 +265,9 @@ stages:
       - provenance/inventories/pre_run_inputs.json
       - provenance/inventories/pre_run_controlled_scripts.json
   - name: inventory_post
+    lifecycle_class: finalization
+    display_order: 110
+    operator_visible: false
     command: make inventory-post
     working_directory: wrapper_repo
     command_kind: wrapper_make_target
@@ -250,6 +283,9 @@ stages:
       - provenance/inventories/post_run_raw_outputs.json
       - provenance/inventories/post_run_derived_products.json
   - name: validate
+    lifecycle_class: factory
+    display_order: 120
+    operator_visible: true
     command: make validate
     working_directory: wrapper_repo
     command_kind: wrapper_make_target
@@ -260,6 +296,9 @@ stages:
     outputs:
       - provenance/validations/required_extract.json
   - name: manifest
+    lifecycle_class: finalization
+    display_order: 130
+    operator_visible: false
     command: make manifest
     working_directory: wrapper_repo
     command_kind: wrapper_make_target
@@ -275,6 +314,9 @@ stages:
     outputs:
       - provenance/manifest.yaml
   - name: manifest_smoke
+    lifecycle_class: finalization
+    display_order: 140
+    operator_visible: false
     command: make manifest-smoke
     working_directory: wrapper_repo
     command_kind: wrapper_make_target
