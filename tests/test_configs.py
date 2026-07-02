@@ -77,3 +77,19 @@ def test_run_config_links_layout_hash_policy_and_validation_expectations() -> No
         "minimum_data_rows": 1,
         "non_empty": True,
     }
+
+
+def test_run_config_stages_declare_lifecycle_metadata() -> None:
+    config = _load_yaml("configs/run.synthetic.yaml")
+
+    stages = config["stages"]
+    assert isinstance(stages, list)
+    display_orders: list[int] = []
+    for stage in stages:
+        assert isinstance(stage, dict)
+        assert stage["lifecycle_class"] in {"admission", "setup", "factory", "finalization"}
+        assert isinstance(stage["display_order"], int)
+        assert isinstance(stage["operator_visible"], bool)
+        display_orders.append(stage["display_order"])
+
+    assert display_orders == sorted(display_orders)
