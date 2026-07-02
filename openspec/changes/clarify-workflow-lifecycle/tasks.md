@@ -7,7 +7,7 @@
 ## 2. Makefile and Documentation Clarity
 
 - [x] 2.1 Reorder or comment the Makefile by lifecycle lane: bootstrap, admission, setup, factory, finalization, and developer quality.
-- [ ] 2.2 Update README and handoff guide to show a concise operator-facing factory flow separate from support/finalization flow.
+- [x] 2.2 Update README and handoff guide to show a concise operator-facing factory flow separate from support/finalization flow.
 - [ ] 2.3 Update the README diagram or nearby text to distinguish core workflow stages from support/evidence steps.
 - [ ] 2.4 Document that `bootstrap-controlled-source` is demo bootstrap and not an ordinary production factory stage.
 

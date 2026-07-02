@@ -81,6 +81,18 @@ ansible-playbook ansible/playbooks/run_synthetic_workflow.yml \
 For focused debugging, individual Make targets can also be run, but keep the same
 configuration values and do not bypass preflight.
 
+Read the run as a small factory flow, not as a flat list of implementation
+targets:
+
+```text
+preflight gate -> workspace setup -> submit/run simulation -> extract results
+-> build reports -> validate products -> inventory and manifest finalization
+```
+
+The granular Make targets are still useful for debugging. The manifest keeps them
+as stage evidence with lifecycle metadata so support/finalization steps do not get
+confused with domain transformations.
+
 Choose a fresh `run_id` for each new execution. If a stage fails, the partial
 `runs/{run_id}/` tree and `provenance/logs/` evidence are useful for inspection,
 but the MVP does not guarantee safe resume or attempt-history semantics. After

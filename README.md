@@ -24,6 +24,20 @@ The diagram below captures the current simulation/data workflow before adding th
 
 The MVP wraps the baseline workflow with a provenance gate, stage contract, evidence sidecar, and manifest assembly while leaving the simulation runtime shape intact.
 
+Operator-facing flow:
+
+```text
+admission gate
+  -> setup controlled run workspace
+  -> submit/run simulation
+  -> extract results
+  -> build report products
+  -> validate delivered products
+  -> finalize evidence and manifest
+```
+
+The Makefile keeps more granular targets for debugging, but not every target is a domain workflow step. `inventory-*`, `manifest`, and `manifest-smoke` are finalization/evidence steps around the factory flow.
+
 ```mermaid
 flowchart TD
     operator["Operator / Engineer<br/>Ubuntu or WSL shell"]
