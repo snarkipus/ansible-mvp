@@ -242,7 +242,15 @@ def test_cli_assembles_and_smoke_validates_manifest(tmp_path: Path, capsys) -> N
                 "scheduler": {"mode": "mock_lsf"},
                 "inputs": [{"relative_path": "input/dirC/ex1.dat"}],
                 "runtime_scripts": [{"relative_path": "procs/run-script.sh"}],
-                "stages": [{"name": "run_simulation", "status": "pass"}],
+                "stages": [
+                    {
+                        "name": "run_simulation",
+                        "lifecycle_class": "factory",
+                        "display_order": 60,
+                        "operator_visible": True,
+                        "status": "pass",
+                    }
+                ],
                 "raw_simulation_outputs": [{"relative_path": "lists/dirC/sim-out.dat"}],
                 "derived_products": [{"relative_path": "products/extracted/required.csv"}],
                 "validations": [{"path": "products/extracted/required.csv", "status": "pass"}],
