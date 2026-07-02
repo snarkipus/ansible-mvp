@@ -2,6 +2,30 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
+PUBLIC_TARGETS = {
+    "bootstrap-controlled-source",
+    "preflight",
+    "prepare-workspace",
+    "materialize-inputs",
+    "materialize-procs",
+    "submit-mock-lsf",
+    "run-simulation",
+    "extract-required",
+    "extract-ad-hoc",
+    "build-reports",
+    "inventory-pre",
+    "inventory-post",
+    "validate",
+    "manifest",
+    "manifest-smoke",
+    "format",
+    "lint",
+    "typecheck",
+    "test",
+    "check",
+    "clean",
+}
+
 
 def _target_recipe(target_name: str) -> list[str]:
     makefile = (ROOT / "Makefile").read_text(encoding="utf-8").splitlines()
@@ -25,3 +49,12 @@ def test_check_target_runs_quality_gate_commands_in_documented_order() -> None:
         "uv run basedpyright",
         "uv run pytest",
     ]
+
+
+def test_public_make_targets_remain_stable() -> None:
+    makefile = (ROOT / "Makefile").read_text(encoding="utf-8").splitlines()
+    declared_targets = {
+        line.split(":", 1)[0] for line in makefile if line and line[0].isalnum() and ":" in line
+    }
+
+    assert PUBLIC_TARGETS.issubset(declared_targets)
