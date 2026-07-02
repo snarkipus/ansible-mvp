@@ -14,7 +14,7 @@
 ## 3. Tests and Validation
 
 - [x] 3.1 Add tests that every configured stage declares lifecycle metadata.
-- [ ] 3.2 Add tests that manifest stage records include lifecycle metadata and preserve configured display order.
+- [x] 3.2 Add tests that manifest stage records include lifecycle metadata and preserve configured display order.
 - [ ] 3.3 Add tests or documentation checks that existing Make target names remain stable.
 - [ ] 3.4 Run `make check`.
 - [ ] 3.5 Run `openspec validate clarify-workflow-lifecycle --type change --strict --json` and `openspec validate --specs --strict --json`.

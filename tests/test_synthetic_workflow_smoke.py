@@ -61,9 +61,14 @@ def test_clean_synthetic_workflow_smoke_generates_manifest_reports_and_validatio
     assert {"summary.xlsx", "chart.png", "briefing.pptx"}.issubset(report_names)
     assert any(record["status"] == "pass" for record in manifest["validations"])
     assert yaml.safe_load(required_validation.read_text(encoding="utf-8"))["status"] == "pass"
-    configured_stage_names = [stage["name"] for stage in _load_run_config(wrapper)["stages"]]
+    configured_stages = _load_run_config(wrapper)["stages"]
+    configured_stage_names = [stage["name"] for stage in configured_stages]
     manifest_stage_names = [stage["name"] for stage in manifest["stages"]]
     assert manifest_stage_names == configured_stage_names
+    for configured_stage, manifest_stage in zip(configured_stages, manifest["stages"], strict=True):
+        assert manifest_stage["lifecycle_class"] == configured_stage["lifecycle_class"]
+        assert manifest_stage["display_order"] == configured_stage["display_order"]
+        assert manifest_stage["operator_visible"] == configured_stage["operator_visible"]
     support_stage_names = {
         "preflight",
         "prepare_workspace",
