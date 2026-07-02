@@ -54,6 +54,15 @@
 - Do not close a bead until its acceptance/success criteria have been reconciled against OpenSpec and any user-input findings have been surfaced.
 - Run `bd lint --json` after creating or bulk-updating beads so missing criteria do not drift from OpenSpec.
 
+## OpenSpec-to-Beads Lifecycle
+- Propose the change first: create the OpenSpec proposal, design, spec deltas, and task checklist before implementation begins.
+- Treat the OpenSpec task checklist as the implementation breakdown source of truth.
+- After the proposal is accepted, map each actionable OpenSpec task to one or more beads before editing code or docs.
+- Link mapped beads back to the proposal/umbrella bead with `discovered-from` dependencies, and add blocking dependencies so `bd ready --json` reflects the intended task order.
+- Implement from beads, not directly from the OpenSpec task file: claim one ready bead, make the smallest correct change, verify it, reconcile the related OpenSpec checkbox, close the bead, and commit the bead-sized result when appropriate.
+- Before closing the final implementation or validation bead, verify that beads cover every OpenSpec task and that each completed checkbox has a closed bead or an explicit documented rationale.
+- Archive the OpenSpec change only after implementation beads are closed, closure criteria are satisfied, quality gates pass, and the main specs have been updated by the archive flow.
+
 <!-- BEGIN BEADS INTEGRATION v:1 profile:full hash:0a1bbe8a -->
 
 ## Issue Tracking with bd (beads)
