@@ -18,4 +18,4 @@
 - [x] 3.3 Add tests or documentation checks that existing Make target names remain stable.
 - [x] 3.4 Run `make check`.
 - [x] 3.5 Run `openspec validate clarify-workflow-lifecycle --type change --strict --json` and `openspec validate --specs --strict --json`.
-- [ ] 3.6 Run `bd lint --json`.
+- [x] 3.6 Run `bd lint --json`.
