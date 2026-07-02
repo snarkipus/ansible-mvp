@@ -47,6 +47,9 @@ class StageResult:
     """Structured evidence for one executed stage."""
 
     name: str
+    lifecycle_class: str
+    display_order: int
+    operator_visible: bool
     command: str
     working_directory: str
     stdout_log: str
@@ -66,6 +69,9 @@ class StageResult:
 
         return {
             "name": self.name,
+            "lifecycle_class": self.lifecycle_class,
+            "display_order": self.display_order,
+            "operator_visible": self.operator_visible,
             "command": self.command,
             "working_directory": self.working_directory,
             "cwd": self.working_directory,
@@ -161,6 +167,9 @@ def stage_attempt_evidence(
 
     return StageResult(
         name=stage_name,
+        lifecycle_class=_stage_lifecycle_class(stage),
+        display_order=_stage_display_order(stage),
+        operator_visible=_stage_operator_visible(stage),
         command=_non_empty_string(stage.get("command"), f"stages.{stage_name}.command"),
         working_directory=working_directory_value,
         stdout_log=stdout_log.relative_to(root).as_posix(),
@@ -251,6 +260,9 @@ def run_synthetic_simulation(
 
     return StageResult(
         name="run_simulation",
+        lifecycle_class=_stage_lifecycle_class(stage),
+        display_order=_stage_display_order(stage),
+        operator_visible=_stage_operator_visible(stage),
         command=command,
         working_directory=working_directory.relative_to(root).as_posix(),
         stdout_log=stdout_log.relative_to(root).as_posix(),
@@ -377,6 +389,9 @@ def _run_configured_stage(
 
     return StageResult(
         name=stage_name,
+        lifecycle_class=_stage_lifecycle_class(stage),
+        display_order=_stage_display_order(stage),
+        operator_visible=_stage_operator_visible(stage),
         command=command,
         working_directory=working_directory.relative_to(root).as_posix()
         if working_directory.is_relative_to(root)
@@ -411,6 +426,28 @@ def _stage_controlled_scripts(stage: dict[str, Any]) -> tuple[str, ...]:
     return _string_list(
         value, f"stages.{stage.get('name', '<unknown>')}.expected_controlled_scripts"
     )
+
+
+def _stage_lifecycle_class(stage: dict[str, Any]) -> str:
+    return _non_empty_string(
+        stage.get("lifecycle_class"), f"stages.{stage.get('name', '<unknown>')}.lifecycle_class"
+    )
+
+
+def _stage_display_order(stage: dict[str, Any]) -> int:
+    value = stage.get("display_order")
+    if not isinstance(value, int):
+        stage_name = stage.get("name", "<unknown>")
+        raise ValueError(f"stages.{stage_name}.display_order must be an integer")
+    return value
+
+
+def _stage_operator_visible(stage: dict[str, Any]) -> bool:
+    value = stage.get("operator_visible")
+    if not isinstance(value, bool):
+        stage_name = stage.get("name", "<unknown>")
+        raise ValueError(f"stages.{stage_name}.operator_visible must be a boolean")
+    return value
 
 
 def _artifact(path: Path, relative_path: Path, *, include_hash: bool) -> StageArtifact:

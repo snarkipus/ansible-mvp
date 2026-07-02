@@ -59,6 +59,9 @@ def _write_config(path: Path) -> None:
                 "stages": [
                     {
                         "name": "run_simulation",
+                        "lifecycle_class": "factory",
+                        "display_order": 60,
+                        "operator_visible": True,
                         "command": "procs/run-script.sh",
                         "working_directory": "sim-run-root",
                         "inputs": ["sim-run-root/input"],
@@ -66,6 +69,9 @@ def _write_config(path: Path) -> None:
                     },
                     {
                         "name": "extract_required",
+                        "lifecycle_class": "factory",
+                        "display_order": 70,
+                        "operator_visible": True,
                         "command": (
                             "scripts/extract_required.pl sim-run-root/lists/dirC/sim-out.dat "
                             "provenance/products/extracted/required.csv"
@@ -77,6 +83,9 @@ def _write_config(path: Path) -> None:
                     },
                     {
                         "name": "extract_ad_hoc",
+                        "lifecycle_class": "factory",
+                        "display_order": 80,
+                        "operator_visible": True,
                         "command": (
                             "scripts/ad_hoc_extract.py sim-run-root/lists/dirC/sim-out.dat "
                             "provenance/products/extracted/ad_hoc.csv"
