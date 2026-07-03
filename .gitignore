@@ -22,3 +22,6 @@ __pycache__/
 .ruff_cache/
 .venv/
 venv/
+
+# Private Docs
+docs/hermes-wiki
