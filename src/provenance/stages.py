@@ -47,6 +47,7 @@ class StageResult:
     """Structured evidence for one executed stage."""
 
     name: str
+    display_name: str
     lifecycle_class: str
     display_order: int
     operator_visible: bool
@@ -69,6 +70,7 @@ class StageResult:
 
         return {
             "name": self.name,
+            "display_name": self.display_name,
             "lifecycle_class": self.lifecycle_class,
             "display_order": self.display_order,
             "operator_visible": self.operator_visible,
@@ -167,6 +169,7 @@ def stage_attempt_evidence(
 
     return StageResult(
         name=stage_name,
+        display_name=_stage_display_name(stage),
         lifecycle_class=_stage_lifecycle_class(stage),
         display_order=_stage_display_order(stage),
         operator_visible=_stage_operator_visible(stage),
@@ -260,6 +263,7 @@ def run_synthetic_simulation(
 
     return StageResult(
         name="run_simulation",
+        display_name=_stage_display_name(stage),
         lifecycle_class=_stage_lifecycle_class(stage),
         display_order=_stage_display_order(stage),
         operator_visible=_stage_operator_visible(stage),
@@ -389,6 +393,7 @@ def _run_configured_stage(
 
     return StageResult(
         name=stage_name,
+        display_name=_stage_display_name(stage),
         lifecycle_class=_stage_lifecycle_class(stage),
         display_order=_stage_display_order(stage),
         operator_visible=_stage_operator_visible(stage),
@@ -431,6 +436,12 @@ def _stage_controlled_scripts(stage: dict[str, Any]) -> tuple[str, ...]:
 def _stage_lifecycle_class(stage: dict[str, Any]) -> str:
     return _non_empty_string(
         stage.get("lifecycle_class"), f"stages.{stage.get('name', '<unknown>')}.lifecycle_class"
+    )
+
+
+def _stage_display_name(stage: dict[str, Any]) -> str:
+    return _non_empty_string(
+        stage.get("display_name"), f"stages.{stage.get('name', '<unknown>')}.display_name"
     )
 
 

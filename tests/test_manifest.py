@@ -78,6 +78,17 @@ def test_assemble_manifest_connects_core_provenance_sections() -> None:
             },
             controlled_source_gate={"status": "pass", "checked_scripts": ["procs/run-script.sh"]},
             scheduler={"mode": "mock_lsf", "metadata_path": "scheduler/submission.yaml"},
+            workflow={
+                "operator_flow": [
+                    {
+                        "stage": "simulation",
+                        "display_name": "Run simulation",
+                        "lifecycle_class": "factory",
+                        "display_order": 60,
+                        "status": "pass",
+                    }
+                ]
+            },
             inputs=(
                 {
                     **input_record.to_dict(),
@@ -97,6 +108,10 @@ def test_assemble_manifest_connects_core_provenance_sections() -> None:
             stages=(
                 {
                     "name": "simulation",
+                    "display_name": "Run simulation",
+                    "lifecycle_class": "factory",
+                    "display_order": 60,
+                    "operator_visible": True,
                     "command": "procs/run-script.sh",
                     "working_directory": "runs/demo_001/sim-run-root",
                     "status": "pass",

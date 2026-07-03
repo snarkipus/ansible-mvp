@@ -66,9 +66,13 @@ def test_clean_synthetic_workflow_smoke_generates_manifest_reports_and_validatio
     manifest_stage_names = [stage["name"] for stage in manifest["stages"]]
     assert manifest_stage_names == configured_stage_names
     for configured_stage, manifest_stage in zip(configured_stages, manifest["stages"], strict=True):
+        assert manifest_stage["display_name"] == configured_stage["display_name"]
         assert manifest_stage["lifecycle_class"] == configured_stage["lifecycle_class"]
         assert manifest_stage["display_order"] == configured_stage["display_order"]
         assert manifest_stage["operator_visible"] == configured_stage["operator_visible"]
+    assert [entry["stage"] for entry in manifest["workflow"]["operator_flow"]] == [
+        stage["name"] for stage in configured_stages if stage["operator_visible"]
+    ]
     support_stage_names = {
         "preflight",
         "prepare_workspace",

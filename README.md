@@ -27,16 +27,16 @@ The MVP wraps the baseline workflow with a provenance gate, stage contract, evid
 Operator-facing flow:
 
 ```text
-admission gate
-  -> setup controlled run workspace
-  -> submit/run simulation
-  -> extract results
-  -> build report products
-  -> validate delivered products
-  -> finalize evidence and manifest
+Preflight gate
+  -> Prepare simulation inputs
+  -> Submit simulation
+  -> Run simulation
+  -> Extract required/ad hoc results
+  -> Build report products
+  -> Validate products
 ```
 
-The Makefile keeps more granular targets for debugging, but not every target is a domain workflow step. `inventory-*`, `manifest`, and `manifest-smoke` are finalization/evidence steps around the factory flow.
+The Makefile keeps more granular targets for debugging, and the manifest keeps complete stage evidence. The concise operator flow is also recorded under `workflow.operator_flow`; support/finalization steps remain available under `stages`.
 
 ```mermaid
 flowchart TD
@@ -347,10 +347,11 @@ For large production raw outputs, the future policy may record size and modifica
 - timestamps,
 - repository state,
 - controlled source gate result,
+- concise `workflow.operator_flow` summary,
 - input inventory,
 - materialization mode for each input,
 - mock scheduler metadata,
-- stage commands/status/timestamps/log paths,
+- complete stage commands/status/timestamps/log paths,
 - raw simulation output inventory,
 - derived product inventory,
 - validation results,

@@ -84,17 +84,17 @@ ansible-playbook ansible/playbooks/run_synthetic_workflow.yml \
 For focused debugging, individual Make targets can also be run, but keep the same
 configuration values and do not bypass preflight.
 
-Read the run as a small factory flow, not as a flat list of implementation
+Read the run as a small operator flow, not as a flat list of implementation
 targets:
 
 ```text
-preflight gate -> workspace setup -> submit/run simulation -> extract results
--> build reports -> validate products -> inventory and manifest finalization
+Preflight gate -> Prepare simulation inputs -> Submit simulation
+-> Run simulation -> Extract results -> Build reports -> Validate products
 ```
 
-The granular Make targets are still useful for debugging. The manifest keeps them
-as stage evidence with lifecycle metadata so support/finalization steps do not get
-confused with domain transformations.
+The granular Make targets are still useful for debugging. The manifest records the
+small flow under `workflow.operator_flow` and keeps complete support/finalization
+evidence under `stages`.
 
 Choose a fresh `run_id` for each new execution. If a stage fails, the partial
 `runs/{run_id}/` tree and `provenance/logs/` evidence are useful for inspection,
@@ -144,12 +144,14 @@ less runs/demo_001/provenance/manifest.yaml
 
 Important sections to check:
 
+- `workflow.operator_flow`: the short human-readable flow through operator-visible
+  stages, with display names, status, lifecycle class, and links to evidence.
 - `repositories`: wrapper and controlled-source Git state, requested refs, resolved
   commits, branch/tag/describe values, tracked script paths, and hashes.
 - `controlled_source_gate`: preflight checks that passed before execution.
 - `inputs` and `runtime_scripts`: where materialized inputs/scripts came from and
   how they were copied into the run.
-- `stages`: first-class attempt evidence for every configured workflow stage,
+- `stages`: complete first-class attempt evidence for every configured workflow stage,
   including support/orchestration steps; records commands, working directories,
   statuses, return codes, log paths, evidence paths, timings, controlled scripts,
   inputs, and outputs.

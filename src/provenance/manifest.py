@@ -27,6 +27,7 @@ MANIFEST_VERSION = "0.1"
 REQUIRED_TOP_LEVEL_SECTIONS: tuple[str, ...] = (
     "manifest_version",
     "run",
+    "workflow",
     "repositories",
     "simulation_layout",
     "controlled_source_gate",
@@ -45,6 +46,12 @@ REQUIRED_NON_EMPTY_KEY_PATHS: tuple[str, ...] = (
     "manifest_version",
     "run.run_id",
     "run.run_root",
+    "workflow.operator_flow",
+    "workflow.operator_flow[].stage",
+    "workflow.operator_flow[].display_name",
+    "workflow.operator_flow[].lifecycle_class",
+    "workflow.operator_flow[].display_order",
+    "workflow.operator_flow[].status",
     "repositories",
     "repositories[].name",
     "repositories[].path",
@@ -58,6 +65,7 @@ REQUIRED_NON_EMPTY_KEY_PATHS: tuple[str, ...] = (
     "inputs",
     "runtime_scripts",
     "stages",
+    "stages[].display_name",
     "stages[].lifecycle_class",
     "stages[].display_order",
     "stages[].operator_visible",
@@ -100,6 +108,7 @@ class ManifestAssemblyInput:
     inputs: Sequence[ManifestRecord] = ()
     runtime_scripts: Sequence[ManifestRecord] = ()
     stages: Sequence[ManifestRecord] = ()
+    workflow: Mapping[str, object] | None = None
     raw_simulation_outputs: Sequence[ManifestRecord] = ()
     derived_products: Sequence[ManifestRecord] = ()
     validations: Sequence[ManifestRecord] = ()
@@ -116,6 +125,7 @@ def assemble_manifest(input_data: ManifestAssemblyInput) -> ManifestDict:
     manifest: ManifestDict = {
         "manifest_version": input_data.manifest_version,
         "run": _normalize_mapping(input_data.run),
+        "workflow": _normalize_mapping(input_data.workflow or {}),
         "repositories": _normalize_records(input_data.repositories),
         "simulation_layout": _normalize_mapping(input_data.simulation_layout),
         "controlled_source_gate": _normalize_mapping(input_data.controlled_source_gate),
@@ -203,6 +213,7 @@ def assemble_run_manifest(
             "description": _required_mapping(config, "run").get("description"),
             "run_root": run_root.relative_to(root).as_posix(),
         },
+        workflow={"operator_flow": _operator_flow(stages)},
         repositories=(wrapper_repo, controlled_repo),
         simulation_layout={
             "run_root": run_root.relative_to(root).as_posix(),
@@ -309,13 +320,36 @@ def _read_json_records(directory: Path, pattern: str) -> list[dict[str, Any]]:
 def _ordered_stage_records(
     records: Sequence[dict[str, Any]], config: Mapping[str, object]
 ) -> list[dict[str, Any]]:
-    configured_names = [
-        str(stage.get("name"))
-        for stage in _required_list(config, "stages")
-        if isinstance(stage, Mapping) and isinstance(stage.get("name"), str)
-    ]
-    order = {name: index for index, name in enumerate(configured_names)}
-    return sorted(records, key=lambda record: order.get(str(record.get("name")), len(order)))
+    display_order_by_name: dict[str, int] = {}
+    for stage in _required_list(config, "stages"):
+        if not isinstance(stage, Mapping):
+            continue
+        name = stage.get("name")
+        display_order = stage.get("display_order")
+        if isinstance(name, str) and isinstance(display_order, int):
+            display_order_by_name[name] = display_order
+    return sorted(
+        records,
+        key=lambda record: display_order_by_name.get(str(record.get("name")), len(records)),
+    )
+
+
+def _operator_flow(stages: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    flow: list[dict[str, Any]] = []
+    for stage in stages:
+        if stage.get("operator_visible") is not True:
+            continue
+        flow.append(
+            {
+                "stage": stage.get("name"),
+                "display_name": stage.get("display_name"),
+                "lifecycle_class": stage.get("lifecycle_class"),
+                "display_order": stage.get("display_order"),
+                "status": stage.get("status"),
+                "evidence_path": stage.get("evidence_path"),
+            }
+        )
+    return flow
 
 
 def _missing_for_key_path(manifest: Mapping[str, object], key_path: str) -> list[str]:

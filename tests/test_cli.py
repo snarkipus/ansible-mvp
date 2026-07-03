@@ -240,11 +240,23 @@ def test_cli_assembles_and_smoke_validates_manifest(tmp_path: Path, capsys) -> N
                 },
                 "controlled_source_gate": {"status": "pass"},
                 "scheduler": {"mode": "mock_lsf"},
+                "workflow": {
+                    "operator_flow": [
+                        {
+                            "stage": "run_simulation",
+                            "display_name": "Run simulation",
+                            "lifecycle_class": "factory",
+                            "display_order": 60,
+                            "status": "pass",
+                        }
+                    ]
+                },
                 "inputs": [{"relative_path": "input/dirC/ex1.dat"}],
                 "runtime_scripts": [{"relative_path": "procs/run-script.sh"}],
                 "stages": [
                     {
                         "name": "run_simulation",
+                        "display_name": "Run simulation",
                         "lifecycle_class": "factory",
                         "display_order": 60,
                         "operator_visible": True,

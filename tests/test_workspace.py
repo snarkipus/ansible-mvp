@@ -59,6 +59,7 @@ def _write_config(path: Path) -> None:
                 "stages": [
                     {
                         "name": "run_simulation",
+                        "display_name": "Run simulation",
                         "lifecycle_class": "factory",
                         "display_order": 60,
                         "operator_visible": True,
@@ -69,6 +70,7 @@ def _write_config(path: Path) -> None:
                     },
                     {
                         "name": "extract_required",
+                        "display_name": "Extract required results",
                         "lifecycle_class": "factory",
                         "display_order": 70,
                         "operator_visible": True,
@@ -83,6 +85,7 @@ def _write_config(path: Path) -> None:
                     },
                     {
                         "name": "extract_ad_hoc",
+                        "display_name": "Extract ad hoc results",
                         "lifecycle_class": "factory",
                         "display_order": 80,
                         "operator_visible": True,

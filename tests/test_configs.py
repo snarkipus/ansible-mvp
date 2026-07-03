@@ -37,14 +37,14 @@ def test_run_config_declares_controlled_scripts_and_stage_commands() -> None:
         "prepare_workspace",
         "materialize_inputs",
         "materialize_procs",
+        "inventory_pre",
         "submit_mock_lsf",
         "run_simulation",
         "extract_required",
         "extract_ad_hoc",
         "build_reports",
-        "inventory_pre",
-        "inventory_post",
         "validate",
+        "inventory_post",
         "manifest",
         "manifest_smoke",
     ]
@@ -87,6 +87,8 @@ def test_run_config_stages_declare_lifecycle_metadata() -> None:
     display_orders: list[int] = []
     for stage in stages:
         assert isinstance(stage, dict)
+        assert isinstance(stage["display_name"], str)
+        assert stage["display_name"]
         assert stage["lifecycle_class"] in {"admission", "setup", "factory", "finalization"}
         assert isinstance(stage["display_order"], int)
         assert isinstance(stage["operator_visible"], bool)

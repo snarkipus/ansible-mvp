@@ -13,13 +13,13 @@ workflow_stage_targets:
   - prepare-workspace
   - materialize-inputs
   - materialize-procs
+  - inventory-pre
   - submit-mock-lsf
   - run-simulation
   - extract-required
   - extract-ad-hoc
   - build-reports
-  - inventory-pre
-  - inventory-post
   - validate
+  - inventory-post
   - manifest
   - manifest-smoke
