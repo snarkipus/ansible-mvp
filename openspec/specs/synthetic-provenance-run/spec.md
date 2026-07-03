@@ -68,14 +68,14 @@ The system SHALL support the documented Ansible command shape for a clean synthe
 
 #### Scenario: Clean synthetic run succeeds
 - **WHEN** the controlled source demo is bootstrapped and the documented `ansible-playbook` command is run with `run_id`, `controlled_source_repo`, and `controlled_source_ref`
-- **THEN** the workflow completes successfully and writes the expected run and provenance outputs
+- **THEN** the workflow completes successfully and writes expected run outputs, detailed stage evidence, and a concise operator workflow summary
 
 ### Requirement: Workflow stages are classified by lifecycle lane
 The system SHALL distinguish demo bootstrap, admission, setup, factory, and finalization lifecycle lanes in stage declarations and operator documentation.
 
 #### Scenario: Stage declaration includes lifecycle metadata
 - **WHEN** a configured run stage is declared
-- **THEN** the declaration includes a lifecycle class, display order, and operator-visibility value
+- **THEN** the declaration includes a display name, lifecycle class, display order, and operator-visibility value
 
 #### Scenario: Demo bootstrap is outside ordinary run lineage
 - **WHEN** `make bootstrap-controlled-source` creates or verifies the synthetic controlled-source repository
@@ -83,10 +83,10 @@ The system SHALL distinguish demo bootstrap, admission, setup, factory, and fina
 
 #### Scenario: Operator-facing flow is simplified
 - **WHEN** a user reads the README or handoff guide
-- **THEN** the documentation distinguishes the core factory flow from admission, setup, evidence collection, and finalization support steps
+- **THEN** the documentation distinguishes the concise operator workflow from admission/setup plumbing, evidence collection, and finalization support steps
 
 #### Scenario: Make targets remain stable
-- **WHEN** lifecycle lanes are documented or added to configuration
+- **WHEN** lifecycle lanes and display names are documented or added to configuration
 - **THEN** existing Make target names remain available for focused debugging
 
 ### Requirement: Handoff guide explains how to use and extend the MVP
