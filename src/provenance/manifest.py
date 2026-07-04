@@ -7,7 +7,12 @@ deterministic mapping suitable for writing as ``manifest.yaml``.
 
 from __future__ import annotations
 
+import getpass
 import json
+import platform
+import socket
+import subprocess
+import sys
 from dataclasses import asdict, dataclass, is_dataclass
 from enum import Enum
 from pathlib import Path
@@ -47,6 +52,14 @@ REQUIRED_NON_EMPTY_KEY_PATHS: tuple[str, ...] = (
     "manifest_version",
     "run.run_id",
     "run.run_root",
+    "run.started_at",
+    "run.finished_at",
+    "run.execution_context",
+    "run.execution_context.executed_by",
+    "run.execution_context.hostname",
+    "run.execution_context.platform",
+    "run.execution_context.python_version",
+    "run.execution_context.git_version",
     "workflow.operator_flow",
     "workflow.operator_flow[].stage",
     "workflow.operator_flow[].display_name",
@@ -207,12 +220,16 @@ def assemble_run_manifest(
     stages = _ordered_stage_records(_read_json_records(logs_root, "*.stage.json"), config)
     logs = _log_records(root, logs_root)
     validations = _read_json_records(validations_root, "*.json")
+    run_started_at, run_finished_at = _run_time_range(stages)
 
     assembly_input = ManifestAssemblyInput(
         run={
             "run_id": run_id,
             "description": _required_mapping(config, "run").get("description"),
             "run_root": run_root.relative_to(root).as_posix(),
+            "started_at": run_started_at,
+            "finished_at": run_finished_at,
+            "execution_context": _execution_context(),
         },
         workflow={"operator_flow": _operator_flow(stages)},
         repositories=(wrapper_repo, controlled_repo),
@@ -310,6 +327,39 @@ def _controlled_repository_manifest_record(
     record["tracked_script_paths"] = [script["relative_path"] for script in script_records]
     record["scripts"] = script_records
     return record
+
+
+def _run_time_range(stages: Sequence[Mapping[str, Any]]) -> tuple[str | None, str | None]:
+    starts = [
+        value for stage in stages if isinstance(value := stage.get("started_at"), str) and value
+    ]
+    finishes = [
+        value for stage in stages if isinstance(value := stage.get("finished_at"), str) and value
+    ]
+    return (min(starts) if starts else None, max(finishes) if finishes else None)
+
+
+def _execution_context() -> dict[str, str]:
+    return {
+        "executed_by": getpass.getuser(),
+        "hostname": socket.gethostname(),
+        "platform": platform.platform(),
+        "python_version": sys.version.split()[0],
+        "git_version": _git_version(),
+    }
+
+
+def _git_version() -> str:
+    try:
+        completed = subprocess.run(
+            ["git", "--version"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return "unavailable"
+    return completed.stdout.strip() or "unavailable"
 
 
 def _read_json_records(directory: Path, pattern: str) -> list[dict[str, Any]]:

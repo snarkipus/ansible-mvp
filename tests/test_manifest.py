@@ -60,7 +60,19 @@ def test_assemble_manifest_connects_core_provenance_sections() -> None:
 
     manifest = assemble_manifest(
         ManifestAssemblyInput(
-            run={"run_id": "demo_001", "root": Path("runs/demo_001")},
+            run={
+                "run_id": "demo_001",
+                "run_root": "runs/demo_001",
+                "started_at": "2026-06-29T00:00:00+00:00",
+                "finished_at": "2026-06-29T00:00:02+00:00",
+                "execution_context": {
+                    "executed_by": "tester",
+                    "hostname": "localhost",
+                    "platform": "Linux",
+                    "python_version": "3.12.0",
+                    "git_version": "git version 2.0.0",
+                },
+            },
             repositories=(
                 {
                     "name": "controlled-source-demo",

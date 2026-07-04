@@ -82,7 +82,10 @@ ansible-playbook ansible/playbooks/run_synthetic_workflow.yml \
 ```
 
 For focused debugging, individual Make targets can also be run, but keep the same
-configuration values and do not bypass preflight.
+configuration values and do not bypass preflight. Full runs require a fresh
+`run_id` by default. To inspect or debug an existing run workspace intentionally,
+run `make preflight RUN_ROOT_POLICY=reuse RUN_ID=<existing>` before targeted
+reruns and treat any remaining evidence as developer-accepted reuse state.
 
 Read the run as a small operator flow, not as a flat list of implementation
 targets:
@@ -93,8 +96,8 @@ Preflight gate -> Prepare simulation inputs -> Submit simulation
 ```
 
 The granular Make targets are still useful for debugging. The manifest records the
-small flow under `workflow.operator_flow` and keeps complete support/finalization
-evidence under `stages`.
+small flow under `workflow.operator_flow` and keeps complete support, evidence,
+and finalization records under `stages`.
 
 Choose a fresh `run_id` for each new execution. If a stage fails, the partial
 `runs/{run_id}/` tree and `provenance/logs/` evidence are useful for inspection,
@@ -146,6 +149,9 @@ Important sections to check:
 
 - `workflow.operator_flow`: the short human-readable flow through operator-visible
   stages, with display names, status, lifecycle class, and links to evidence.
+- `run.started_at`, `run.finished_at`, and `run.execution_context`: the run-level
+  time range derived from stage evidence plus local user, host, platform, Python,
+  and Git version context for the manifest assembly environment.
 - `repositories`: wrapper and controlled-source Git state, requested refs, resolved
   commits, branch/tag/describe values, tracked script paths, and hashes.
 - `controlled_source_gate`: preflight checks that passed before execution.

@@ -239,6 +239,10 @@ ansible-playbook ansible/playbooks/run_synthetic_workflow.yml \
   -e controlled_source_ref=controlled-source-demo-v0.1.0
 ```
 
+Use a fresh `run_id` for each full Ansible run. Preflight fails before writing
+new run evidence when `runs/{run_id}` already exists; choose a new id rather
+than merging evidence from an earlier attempt.
+
 Expected result:
 
 ```text
@@ -301,7 +305,7 @@ make check
 make clean
 ```
 
-The Ansible playbook invokes these Make targets in the order configured by `ansible/inventory/group_vars/all.yml`: `preflight`, workspace preparation, materialization, mock LSF submission, simulation, extraction, reporting, inventories, validation, manifest assembly, and manifest smoke validation. For focused debugging, keep the same `RUN_ID`, `CONTROLLED_SOURCE_REPO`, and `CONTROLLED_SOURCE_REF` values and do not bypass `make preflight`.
+The Ansible playbook invokes these Make targets in the order configured by `ansible/inventory/group_vars/all.yml`: `preflight`, workspace preparation, materialization, mock LSF submission, simulation, extraction, reporting, inventories, validation, manifest assembly, and manifest smoke validation. For focused debugging of an existing run workspace, keep the same `RUN_ID`, `CONTROLLED_SOURCE_REPO`, and `CONTROLLED_SOURCE_REF` values, run `make preflight RUN_ROOT_POLICY=reuse`, and do not bypass the preflight gate.
 
 ## Controlled Source Gate
 
@@ -316,6 +320,9 @@ Before execution, `make preflight` verifies:
 
 The manifest records:
 
+- run-level `started_at` and `finished_at` timestamps derived from stage evidence,
+- local `run.execution_context` values such as user, host, platform, Python version,
+  and Git version,
 - repository path,
 - requested ref,
 - resolved commit,

@@ -6,6 +6,7 @@
 RUN_ID ?= demo_001
 CONTROLLED_SOURCE_REPO ?= ../controlled-source-demo
 CONTROLLED_SOURCE_REF ?= controlled-source-demo-v0.1.0
+RUN_ROOT_POLICY ?= fresh
 PYTHON_PACKAGE := src/provenance
 RUN_ROOT := runs/$(RUN_ID)
 PROVENANCE_ROOT := $(RUN_ROOT)/provenance
@@ -31,6 +32,7 @@ preflight: ## Run the Git-controlled source entrance gate before workflow stages
 		--wrapper-repo . \
 		--controlled-source-repo "$(CONTROLLED_SOURCE_REPO)" \
 		--controlled-source-ref "$(CONTROLLED_SOURCE_REF)" \
+		--run-root-policy "$(RUN_ROOT_POLICY)" \
 		--output "$(PROVENANCE_ROOT)/preflight.json" \
 		--stage-output "$(PROVENANCE_ROOT)/logs/preflight.stage.json"
 

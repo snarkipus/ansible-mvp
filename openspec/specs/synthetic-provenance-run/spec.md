@@ -70,8 +70,21 @@ The system SHALL support the documented Ansible command shape for a clean synthe
 - **WHEN** the controlled source demo is bootstrapped and the documented `ansible-playbook` command is run with `run_id`, `controlled_source_repo`, and `controlled_source_ref`
 - **THEN** the workflow completes successfully and writes expected run outputs, detailed stage evidence, and a concise operator workflow summary
 
+### Requirement: Run workspaces are fresh by default
+The system SHALL reject full workflow runs that attempt to reuse an existing `runs/{run_id}` workspace unless reuse is explicitly requested for developer debugging.
+
+#### Scenario: Existing run workspace is rejected by default
+- **WHEN** preflight starts for a `run_id` whose `runs/{run_id}` workspace already exists
+- **THEN** preflight fails before writing new run evidence
+- **AND** the error explains that the run id must be fresh or explicitly reused
+
+#### Scenario: Explicit reuse policy permits focused debugging
+- **WHEN** preflight starts for an existing `runs/{run_id}` workspace with run-root policy `reuse`
+- **THEN** preflight continues through the normal controlled-source gate checks
+- **AND** the operator has explicitly accepted that existing evidence may remain in the workspace
+
 ### Requirement: Workflow stages are classified by lifecycle lane
-The system SHALL distinguish demo bootstrap, admission, setup, factory, and finalization lifecycle lanes in stage declarations and operator documentation.
+The system SHALL distinguish demo bootstrap, admission, setup, evidence, factory, and finalization lifecycle lanes in stage declarations and operator documentation.
 
 #### Scenario: Stage declaration includes lifecycle metadata
 - **WHEN** a configured run stage is declared
@@ -88,6 +101,11 @@ The system SHALL distinguish demo bootstrap, admission, setup, factory, and fina
 #### Scenario: Make targets remain stable
 - **WHEN** lifecycle lanes and display names are documented or added to configuration
 - **THEN** existing Make target names remain available for focused debugging
+
+#### Scenario: Pre-run inventory is evidence collection
+- **WHEN** the `inventory_pre` stage is declared in configuration and recorded in the manifest
+- **THEN** its lifecycle class is `evidence`
+- **AND** it remains outside the concise operator-facing factory flow
 
 ### Requirement: Handoff guide explains how to use and extend the MVP
 The system SHALL include a concise handoff guide for junior engineers using the MVP as a template.

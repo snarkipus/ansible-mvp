@@ -228,7 +228,19 @@ def test_cli_assembles_and_smoke_validates_manifest(tmp_path: Path, capsys) -> N
     input_yaml.write_text(
         yaml.safe_dump(
             {
-                "run": {"run_id": "demo_001", "run_root": "runs/demo_001"},
+                "run": {
+                    "run_id": "demo_001",
+                    "run_root": "runs/demo_001",
+                    "started_at": "2026-06-29T00:00:00+00:00",
+                    "finished_at": "2026-06-29T00:00:01+00:00",
+                    "execution_context": {
+                        "executed_by": "tester",
+                        "hostname": "localhost",
+                        "platform": "Linux",
+                        "python_version": "3.12.0",
+                        "git_version": "git version 2.0.0",
+                    },
+                },
                 "repositories": [
                     {
                         "name": "ansible-mvp",
@@ -320,7 +332,19 @@ def test_cli_manifest_smoke_hashes_refreshed_final_manifest(
     )
     base_manifest = {
         "manifest_version": "0.1",
-        "run": {"run_id": "demo_001", "run_root": "runs/demo_001"},
+        "run": {
+            "run_id": "demo_001",
+            "run_root": "runs/demo_001",
+            "started_at": "2026-06-29T00:00:00+00:00",
+            "finished_at": "2026-06-29T00:00:01+00:00",
+            "execution_context": {
+                "executed_by": "tester",
+                "hostname": "localhost",
+                "platform": "Linux",
+                "python_version": "3.12.0",
+                "git_version": "git version 2.0.0",
+            },
+        },
         "workflow": {
             "operator_flow": [
                 {

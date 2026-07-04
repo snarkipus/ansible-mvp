@@ -109,7 +109,13 @@ def test_run_config_stages_declare_lifecycle_metadata() -> None:
         assert isinstance(stage, dict)
         assert isinstance(stage["display_name"], str)
         assert stage["display_name"]
-        assert stage["lifecycle_class"] in {"admission", "setup", "factory", "finalization"}
+        assert stage["lifecycle_class"] in {
+            "admission",
+            "setup",
+            "evidence",
+            "factory",
+            "finalization",
+        }
         assert isinstance(stage["display_order"], int)
         assert isinstance(stage["operator_visible"], bool)
         display_orders.append(stage["display_order"])

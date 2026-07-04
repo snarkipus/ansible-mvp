@@ -187,7 +187,7 @@ stages:
       - sim-run-root/procs/run-script.sh
   - name: inventory_pre
     display_name: Inventory pre-run evidence
-    lifecycle_class: finalization
+    lifecycle_class: evidence
     display_order: 50
     operator_visible: false
     command: make inventory-pre

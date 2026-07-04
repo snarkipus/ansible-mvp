@@ -52,6 +52,14 @@ def test_clean_synthetic_workflow_smoke_generates_manifest_reports_and_validatio
     assert not (sim_root / "provenance").exists()
 
     manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["run"]["started_at"]
+    assert manifest["run"]["finished_at"]
+    execution_context = manifest["run"]["execution_context"]
+    assert execution_context["executed_by"]
+    assert execution_context["hostname"]
+    assert execution_context["platform"]
+    assert execution_context["python_version"]
+    assert execution_context["git_version"].startswith("git version")
     assert manifest["controlled_source_gate"]["status"] == "pass"
     assert manifest["scheduler"]["mode"] == "mock_lsf"
     assert manifest["raw_simulation_outputs"][0]["relative_path"] == "lists/dirC/sim-out.dat"
@@ -110,6 +118,22 @@ def test_preflight_smoke_rejects_dirty_controlled_source(tmp_path: Path) -> None
 
     assert result.returncode != 0
     assert "controlled source repository is dirty" in _combined_output(result)
+
+
+def test_preflight_rejects_existing_run_id_unless_reuse_policy_is_explicit(
+    tmp_path: Path,
+) -> None:
+    wrapper = _prepare_wrapper_checkout(tmp_path)
+    _bootstrap_controlled_source(wrapper)
+    run_id = "duplicate_run"
+    (wrapper / "runs" / run_id).mkdir()
+
+    rejected = _run_make_preflight(wrapper, run_id=run_id, check=False)
+    reused = _run_make_preflight(wrapper, run_id=run_id, run_root_policy="reuse")
+
+    assert rejected.returncode != 0
+    assert "run root already exists" in _combined_output(rejected)
+    assert reused.returncode == 0
 
 
 def test_preflight_smoke_rejects_dirty_wrapper_controlled_path(tmp_path: Path) -> None:
@@ -197,11 +221,19 @@ def _bootstrap_controlled_source(wrapper: Path) -> Path:
 def _run_make_preflight(
     wrapper: Path,
     *,
+    run_id: str = "demo_001",
     ref: str = CONTROLLED_REF,
+    run_root_policy: str = "fresh",
     check: bool = True,
 ) -> subprocess.CompletedProcess[str]:
     return _run(
-        ["make", "preflight", f"CONTROLLED_SOURCE_REF={ref}"],
+        [
+            "make",
+            "preflight",
+            f"RUN_ID={run_id}",
+            f"CONTROLLED_SOURCE_REF={ref}",
+            f"RUN_ROOT_POLICY={run_root_policy}",
+        ],
         cwd=wrapper,
         check=check,
     )

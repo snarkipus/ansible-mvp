@@ -84,6 +84,7 @@ def _build_parser() -> argparse.ArgumentParser:
     preflight.add_argument("--wrapper-repo", type=Path, default=Path("."))
     preflight.add_argument("--controlled-source-repo", type=Path, required=True)
     preflight.add_argument("--controlled-source-ref", required=True)
+    preflight.add_argument("--run-root-policy", choices=("fresh", "reuse"), default="fresh")
     preflight.add_argument("--output", type=Path, help="optional JSON output path")
     preflight.add_argument("--stage-output", type=Path, help="optional stage JSON output path")
     preflight.set_defaults(func=_cmd_preflight)
@@ -269,6 +270,8 @@ def _cmd_git_state(args: argparse.Namespace) -> int:
 
 def _cmd_preflight(args: argparse.Namespace) -> int:
     started_at = _utc_now()
+    if args.run_root_policy == "fresh":
+        _ensure_fresh_run_root(args.config, args.wrapper_repo, args.run_id)
     result = run_preflight(
         config_path=args.config,
         wrapper_repo=args.wrapper_repo,
@@ -285,6 +288,18 @@ def _cmd_preflight(args: argparse.Namespace) -> int:
         controlled_source_repo=args.controlled_source_repo,
     )
     return 0
+
+
+def _ensure_fresh_run_root(config_path: Path, workspace_root: Path, run_id: str) -> None:
+    config = read_config_mapping(config_path)
+    layout = _required_mapping(config, "layout")
+    run_root_template = _required_string(layout, "run_root")
+    run_root = Path(workspace_root).expanduser().resolve() / run_root_template.format(run_id=run_id)
+    if run_root.exists():
+        raise ValueError(
+            f"run root already exists for run_id {run_id!r}: {run_root.as_posix()}; "
+            "choose a fresh run_id or set RUN_ROOT_POLICY=reuse for focused debugging"
+        )
 
 
 def _cmd_prepare_workspace(args: argparse.Namespace) -> int:

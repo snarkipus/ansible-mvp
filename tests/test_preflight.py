@@ -148,6 +148,7 @@ def _prepare_repositories(tmp_path: Path) -> tuple[Path, Path, Path]:
 def _config_payload() -> dict[str, Any]:
     return {
         "schema_version": "0.1",
+        "layout": {"run_root": "runs/{run_id}"},
         "repositories": {
             "wrapper": {
                 "controlled_paths": ["Makefile", "run.synthetic.yaml"],
