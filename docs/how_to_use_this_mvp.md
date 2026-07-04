@@ -261,14 +261,14 @@ bd lint --json
 
 ## Final MVP Verification and Deferred Limitations
 
-Final verification for the MVP scaffold was run on 2026-06-29 with:
+Final verification for the MVP scaffold was refreshed on 2026-07-04 with:
 
 ```bash
 make bootstrap-controlled-source
 make check
 ansible-playbook ansible/playbooks/run_synthetic_workflow.yml \
   -i ansible/inventory/localhost.ini \
-  -e run_id=final_verification_001 \
+  -e run_id=final_verification_20260704 \
   -e controlled_source_repo=../controlled-source-demo \
   -e controlled_source_ref=controlled-source-demo-v0.1.0
 ```
