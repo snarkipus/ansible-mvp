@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Any, cast
 
 import yaml
 
@@ -58,98 +59,104 @@ def test_assemble_manifest_connects_core_provenance_sections() -> None:
         column_counts=(2, 2, 2),
     )
 
-    manifest = assemble_manifest(
-        ManifestAssemblyInput(
-            run={
-                "run_id": "demo_001",
-                "run_root": "runs/demo_001",
-                "started_at": "2026-06-29T00:00:00+00:00",
-                "finished_at": "2026-06-29T00:00:02+00:00",
-                "execution_context": {
-                    "executed_by": "tester",
-                    "hostname": "localhost",
-                    "platform": "Linux",
-                    "python_version": "3.12.0",
-                    "git_version": "git version 2.0.0",
+    manifest = cast(
+        dict[str, Any],
+        assemble_manifest(
+            ManifestAssemblyInput(
+                run={
+                    "run_id": "demo_001",
+                    "run_root": "runs/demo_001",
+                    "started_at": "2026-06-29T00:00:00+00:00",
+                    "finished_at": "2026-06-29T00:00:02+00:00",
+                    "execution_context": {
+                        "executed_by": "tester",
+                        "hostname": "localhost",
+                        "platform": "Linux",
+                        "python_version": "3.12.0",
+                        "git_version": "git version 2.0.0",
+                    },
                 },
-            },
-            repositories=(
-                {
-                    "name": "controlled-source-demo",
-                    "path": Path("../controlled-source-demo"),
-                    "requested_ref": "controlled-source-demo-v0.1.0",
-                    "resolved_commit": "0" * 40,
-                    "describe": "controlled-source-demo-v0.1.0",
-                    "worktree_status": "clean",
-                    "tracked_script_paths": ["procs/run-script.sh"],
-                },
-            ),
-            simulation_layout={
-                "sim_run_root": "runs/demo_001/sim-run-root",
-                "provenance_root": "runs/demo_001/provenance",
-            },
-            controlled_source_gate={"status": "pass", "checked_scripts": ["procs/run-script.sh"]},
-            scheduler={"mode": "mock_lsf", "metadata_path": "scheduler/submission.yaml"},
-            workflow={
-                "operator_flow": [
+                repositories=(
                     {
-                        "stage": "simulation",
+                        "name": "controlled-source-demo",
+                        "path": Path("../controlled-source-demo"),
+                        "requested_ref": "controlled-source-demo-v0.1.0",
+                        "resolved_commit": "0" * 40,
+                        "describe": "controlled-source-demo-v0.1.0",
+                        "worktree_status": "clean",
+                        "tracked_script_paths": ["procs/run-script.sh"],
+                    },
+                ),
+                simulation_layout={
+                    "sim_run_root": "runs/demo_001/sim-run-root",
+                    "provenance_root": "runs/demo_001/provenance",
+                },
+                controlled_source_gate={
+                    "status": "pass",
+                    "checked_scripts": ["procs/run-script.sh"],
+                },
+                scheduler={"mode": "mock_lsf", "metadata_path": "scheduler/submission.yaml"},
+                workflow={
+                    "operator_flow": [
+                        {
+                            "stage": "simulation",
+                            "display_name": "Run simulation",
+                            "lifecycle_class": "factory",
+                            "display_order": 60,
+                            "status": "pass",
+                        }
+                    ]
+                },
+                inputs=(
+                    {
+                        **input_record.to_dict(),
+                        "source_path": "fixtures/input/dirC/ex1.dat",
+                        "run_path": "sim-run-root/input/dirC/ex1.dat",
+                        "materialization_mode": "copy_from_controlled_source",
+                    },
+                ),
+                runtime_scripts=(
+                    {
+                        "source_path": "procs/run-script.sh",
+                        "run_path": "sim-run-root/procs/run-script.sh",
+                        "materialization_mode": "copy_from_controlled_source",
+                        "sha256": "789abc",
+                    },
+                ),
+                stages=(
+                    {
+                        "name": "simulation",
                         "display_name": "Run simulation",
                         "lifecycle_class": "factory",
                         "display_order": 60,
+                        "operator_visible": True,
+                        "command": "procs/run-script.sh",
+                        "working_directory": "runs/demo_001/sim-run-root",
                         "status": "pass",
-                    }
-                ]
-            },
-            inputs=(
-                {
-                    **input_record.to_dict(),
-                    "source_path": "fixtures/input/dirC/ex1.dat",
-                    "run_path": "sim-run-root/input/dirC/ex1.dat",
-                    "materialization_mode": "copy_from_controlled_source",
-                },
-            ),
-            runtime_scripts=(
-                {
-                    "source_path": "procs/run-script.sh",
-                    "run_path": "sim-run-root/procs/run-script.sh",
-                    "materialization_mode": "copy_from_controlled_source",
-                    "sha256": "789abc",
-                },
-            ),
-            stages=(
-                {
-                    "name": "simulation",
-                    "display_name": "Run simulation",
-                    "lifecycle_class": "factory",
-                    "display_order": 60,
-                    "operator_visible": True,
-                    "command": "procs/run-script.sh",
-                    "working_directory": "runs/demo_001/sim-run-root",
-                    "status": "pass",
-                    "return_code": 0,
-                    "logs": ["logs/simulation.stdout.log"],
-                    "controlled_scripts": ["procs/run-script.sh"],
-                    "inputs": ["input/dirC/ex1.dat"],
-                    "outputs": ["lists/dirC/sim-out.dat"],
-                },
-            ),
-            raw_simulation_outputs=(raw_record,),
-            derived_products=(
-                {
-                    "relative_path": "products/extracted/required.csv",
-                    "product_area": "extracted",
-                    "role": "extracted_product",
-                    "producing_stage": "extract_required",
-                    "sha256": "fedcba",
-                },
-            ),
-            validations=(validation,),
-            logs=({"stage": "simulation", "path": "logs/simulation.stdout.log"},),
-            hash_policy=HashPolicy(),
-            notes=("Synthetic MVP manifest assembled from helper records.",),
-            config={"run_config": "configs/run.synthetic.yaml"},
-        )
+                        "return_code": 0,
+                        "logs": ["logs/simulation.stdout.log"],
+                        "controlled_scripts": ["procs/run-script.sh"],
+                        "inputs": ["input/dirC/ex1.dat"],
+                        "outputs": ["lists/dirC/sim-out.dat"],
+                    },
+                ),
+                raw_simulation_outputs=(raw_record,),
+                derived_products=(
+                    {
+                        "relative_path": "products/extracted/required.csv",
+                        "product_area": "extracted",
+                        "role": "extracted_product",
+                        "producing_stage": "extract_required",
+                        "sha256": "fedcba",
+                    },
+                ),
+                validations=(validation,),
+                logs=({"stage": "simulation", "path": "logs/simulation.stdout.log"},),
+                hash_policy=HashPolicy(),
+                notes=("Synthetic MVP manifest assembled from helper records.",),
+                config={"run_config": "configs/run.synthetic.yaml"},
+            )
+        ),
     )
 
     assert missing_required_sections(manifest) == ()

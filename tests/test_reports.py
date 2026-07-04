@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from typing import Any, cast
 
 from openpyxl import load_workbook
 
@@ -25,7 +26,9 @@ def test_build_report_products_writes_expected_derived_artifacts(tmp_path: Path)
     run_id = "report_demo"
     provenance_root = _write_extracted_products(tmp_path, run_id)
 
-    evidence = build_report_product_evidence(run_id=run_id, workspace_root=tmp_path)
+    evidence = cast(
+        list[dict[str, Any]], build_report_product_evidence(run_id=run_id, workspace_root=tmp_path)
+    )
 
     by_name = {Path(record["relative_path"]).name: record for record in evidence}
     assert set(by_name) == {"summary.xlsx", "chart.png", "briefing.pptx"}

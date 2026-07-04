@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def _load_yaml(relative_path: str) -> dict[str, object]:
+def _load_yaml(relative_path: str) -> dict[str, Any]:
     with (ROOT / relative_path).open(encoding="utf-8") as file_obj:
         loaded = yaml.safe_load(file_obj)
     assert isinstance(loaded, dict)

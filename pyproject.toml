@@ -42,7 +42,7 @@ select = ["E", "F", "I", "W"]
 known-first-party = ["provenance"]
 
 [tool.basedpyright]
-include = ["src/provenance"]
+include = ["src/provenance", "tests"]
 pythonVersion = "3.11"
 typeCheckingMode = "basic"
 reportMissingTypeStubs = false
