@@ -1,3 +1,13 @@
+# External Review (Historical)
+
+> **Status: historical, resolved.** This is an external code review captured on
+> 2026-07-03. Every finding below was subsequently fixed or explicitly accepted
+> and documented as a limitation via the archived OpenSpec change
+> `2026-07-04-harden-run-freshness-and-execution-context` and follow-up
+> maintenance commits. Do not treat these findings as current defects; see
+> `docs/how_to_use_this_mvp.md` ("Final MVP Verification and Deferred
+> Limitations") for the accepted limitations that remain by design.
+
 I've now read the full implementation (all src/provenance modules, Makefile, Ansible layer, configs, bootstrap script,
   controlled-source templates, specs, and the tests), and cross-checked the actual final_verification_001 run evidence on disk.
   Here's the review.

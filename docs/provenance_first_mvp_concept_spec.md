@@ -1,6 +1,11 @@
 # Provenance-First Engineering Data Pipeline MVP
 ## Concept Specification and Codex Handoff Document
 
+> **Status: implemented.** This concept has been realized as the runnable MVP
+> scaffold in this repository. `README.md` and `docs/how_to_use_this_mvp.md`
+> are now authoritative for current behavior; this document is retained as the
+> original concept and design intent.
+
 **Purpose:** This document captures the agreed concept for a provenance-first MVP around an existing engineering simulation/data workflow. It is intended as a handoff artifact for Codex or another implementation agent.
 
 **MVP target:** Runnable synthetic reference implementation on Ubuntu/WSL.

@@ -225,6 +225,13 @@ When adding a new stage or artifact:
 
 ## Troubleshooting
 
+- **`run root already exists` at preflight:** every full run needs a fresh
+  `run_id`; pick a new one instead of rerunning into an existing
+  `runs/{run_id}/`. To intentionally inspect or debug an existing workspace,
+  run `make preflight RUN_ROOT_POLICY=reuse RUN_ID=<existing>` first.
+- **`schema_version must be '0.1'` error:** a config under `configs/` was
+  edited without keeping its `schema_version` at the value the helpers
+  support; restore `schema_version: "0.1"` or revert the config change.
 - **Missing `../controlled-source-demo`:** run `make bootstrap-controlled-source`.
 - **Missing ref or tag:** verify `controlled_source_ref` exists in the controlled
   source repo.

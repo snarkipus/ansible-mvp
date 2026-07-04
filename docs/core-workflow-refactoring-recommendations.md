@@ -1,5 +1,12 @@
 # Ansible MVP Core Workflow Refactoring Recommendations
 
+> **Status: implemented.** The recommendations below were realized via the
+> archived OpenSpec changes `2026-07-02-clarify-workflow-lifecycle` and
+> `2026-07-03-clarify-operator-workflow-shape` (lifecycle lanes, concise
+> operator flow, stable Make targets). This document is retained as design
+> rationale; where it differs from `configs/run.synthetic.yaml` or the main
+> specs under `openspec/specs/`, the config and specs are authoritative.
+
 ## Purpose
 
 This page captures discussion guidance for a dedicated OpenSpec change in `snarkipus/ansible-mvp` to separate bootstrap/demo-validation/support machinery from the main factory workflow. It is meant as implementation-agent context for turning the current runnable MVP into a clearer teaching artifact.

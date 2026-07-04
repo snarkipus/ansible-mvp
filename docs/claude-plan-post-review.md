@@ -1,3 +1,13 @@
+# Post-Review Hardening Plan (Historical)
+
+> **Status: historical, executed.** This plan was implemented in full on
+> 2026-07-04 via the archived OpenSpec change
+> `2026-07-04-harden-run-freshness-and-execution-context` plus maintenance
+> commits (see `git log` around "Complete post-review maintenance cleanup" and
+> "Implement run freshness and manifest context"). It is retained as design
+> rationale only; the README and `docs/how_to_use_this_mvp.md` are authoritative
+> for current behavior.
+
  Fix New Review Deficiencies (post-review hardening, new items only)
 
  Context

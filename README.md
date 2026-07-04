@@ -193,7 +193,7 @@ runs/{run_id}/
 - `sim-run-root/procs/`: materialized runtime invocation scripts.
 - `provenance/products/extracted/`: derived CSV outputs generated from raw simulation outputs.
 - `provenance/products/reports/`: generated XLSX/PPTX/figure artifacts.
-- `provenance/logs/`: stage logs and stage evidence for simulation, extraction, and report generation; Ansible itself runs the Make contract rather than writing a separate wrapper log file.
+- `provenance/logs/`: stage logs and `*.stage.json` evidence for every configured workflow stage, including support stages such as preflight, materialization, inventories, and manifest assembly; Ansible itself runs the Make contract rather than writing a separate wrapper log file.
 - `provenance/manifest.yaml`: the run-level provenance spine.
 
 The repeated `dirA`, `dirB`, and `dirC` folder names are intentional. Tools and manifests must identify artifacts by full relative path, simulation area, and logical group, not by leaf directory name alone.
@@ -305,7 +305,16 @@ make check
 make clean
 ```
 
-The Ansible playbook invokes these Make targets in the order configured by `ansible/inventory/group_vars/all.yml`: `preflight`, workspace preparation, materialization, mock LSF submission, simulation, extraction, reporting, inventories, validation, manifest assembly, and manifest smoke validation. For focused debugging of an existing run workspace, keep the same `RUN_ID`, `CONTROLLED_SOURCE_REPO`, and `CONTROLLED_SOURCE_REF` values, run `make preflight RUN_ROOT_POLICY=reuse`, and do not bypass the preflight gate.
+The Ansible playbook invokes the workflow Make targets in the exact order configured by `workflow_stage_targets` in `ansible/inventory/group_vars/all.yml`, which is the source of truth for execution order:
+
+```text
+preflight -> prepare-workspace -> materialize-inputs -> materialize-procs
+-> inventory-pre -> submit-mock-lsf -> run-simulation
+-> extract-required -> extract-ad-hoc -> build-reports
+-> validate -> inventory-post -> manifest -> manifest-smoke
+```
+
+Note that `inventory-pre` records pre-run input/script evidence before mock LSF submission, and `inventory-post` records output evidence after validation. For focused debugging of an existing run workspace, keep the same `RUN_ID`, `CONTROLLED_SOURCE_REPO`, and `CONTROLLED_SOURCE_REF` values, run `make preflight RUN_ROOT_POLICY=reuse`, and do not bypass the preflight gate.
 
 A successful preflight writes admission evidence before `prepare-workspace` runs:
 `runs/{run_id}/provenance/preflight.json` and preflight stage evidence under
