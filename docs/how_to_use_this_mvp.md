@@ -274,12 +274,16 @@ make bootstrap-controlled-source
 make check
 ansible-playbook ansible/playbooks/run_synthetic_workflow.yml \
   -i ansible/inventory/localhost.ini \
-  -e run_id=final_verification_20260704 \
+  -e run_id=final_verification_20260704_hardening2 \
   -e controlled_source_repo=../controlled-source-demo \
   -e controlled_source_ref=controlled-source-demo-v0.1.0
 ```
 
 The bootstrap, quality gate, and clean synthetic workflow completed successfully.
+The manifest included run-level timestamps and `run.execution_context`. A second
+Ansible run with the same `run_id` failed at preflight because the run root
+already existed, and `make preflight RUN_ROOT_POLICY=reuse` succeeded for the
+same run id as an explicit focused-debugging escape hatch.
 Maintainer-only OpenSpec and bead hygiene checks were also run during development;
 they are not required for ordinary demo execution.
 Generated verification outputs are intentionally ignored under `runs/`.
