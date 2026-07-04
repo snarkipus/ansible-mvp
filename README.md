@@ -307,6 +307,11 @@ make clean
 
 The Ansible playbook invokes these Make targets in the order configured by `ansible/inventory/group_vars/all.yml`: `preflight`, workspace preparation, materialization, mock LSF submission, simulation, extraction, reporting, inventories, validation, manifest assembly, and manifest smoke validation. For focused debugging of an existing run workspace, keep the same `RUN_ID`, `CONTROLLED_SOURCE_REPO`, and `CONTROLLED_SOURCE_REF` values, run `make preflight RUN_ROOT_POLICY=reuse`, and do not bypass the preflight gate.
 
+A successful preflight writes admission evidence before `prepare-workspace` runs:
+`runs/{run_id}/provenance/preflight.json` and preflight stage evidence under
+`provenance/logs/`. Failed freshness or controlled-source checks fail before
+writing new run evidence.
+
 ## Controlled Source Gate
 
 Before execution, `make preflight` verifies:

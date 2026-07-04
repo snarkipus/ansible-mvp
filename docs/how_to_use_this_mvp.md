@@ -105,6 +105,12 @@ but the MVP does not guarantee safe resume or attempt-history semantics. After
 fixing the cause of the failure, start again with a new `run_id` unless resume
 behavior is added in a future change.
 
+Preflight is the admission gate and also the first evidence-producing target. A
+successful preflight may create `runs/{run_id}/provenance/preflight.json` and
+`provenance/logs/preflight.stage.json` before `prepare-workspace` creates the
+rest of the run directories. Freshness or controlled-source failures occur before
+new run evidence is written.
+
 ## Expected Outputs
 
 A successful run creates this high-level shape:
