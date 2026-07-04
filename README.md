@@ -133,7 +133,7 @@ The MVP uses two repositories:
 
 ```text
 workspace/
-├── provenance-mvp/           # this repo: Ansible, Make, provenance helpers
+├── ansible-mvp/              # this repo: Ansible, Make, provenance helpers
 └── controlled-source-demo/    # Git-controlled synthetic simulation/scripts
 ```
 

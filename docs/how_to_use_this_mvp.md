@@ -278,6 +278,14 @@ Maintainer-only OpenSpec and bead hygiene checks were also run during developmen
 they are not required for ordinary demo execution.
 Generated verification outputs are intentionally ignored under `runs/`.
 
+Support-stage evidence is an MVP orchestration record. For support targets such as
+`preflight`, inventory, validation, manifest assembly, and manifest smoke checks,
+the Python helpers write success evidence after the target completes rather than
+capturing the exact Make/Ansible process streams. Executable simulation and
+extraction stages capture observed return codes and stdout/stderr directly. Do
+not treat support-stage evidence as a production-grade scheduler or shell audit
+trail.
+
 Known deferred limitations are tracked as follow-up beads rather than implemented in
 this MVP: production real-LSF integration, safe failed-run resume semantics,
 long-term artifact archival/formal schema validation, and production-scale hash

@@ -1,9 +1,12 @@
+import hashlib
 import json
 import subprocess
 from pathlib import Path
 
 import yaml
+from pytest import MonkeyPatch
 
+import provenance.cli as cli
 from provenance.cli import main
 from provenance.manifest import REQUIRED_TOP_LEVEL_SECTIONS
 
@@ -302,6 +305,110 @@ def test_cli_manifest_smoke_fails_for_missing_key_values(tmp_path: Path, capsys)
     assert smoke["status"] == "fail"
     assert smoke["missing_required_sections"] == []
     assert "run.run_id" in smoke["missing_required_key_values"]
+
+
+def test_cli_manifest_smoke_hashes_refreshed_final_manifest(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    manifest_path = tmp_path / "runs" / "demo_001" / "provenance" / "manifest.yaml"
+    smoke_output = (
+        tmp_path / "runs" / "demo_001" / "provenance" / "validations" / "manifest_smoke.json"
+    )
+    smoke_stage_output = (
+        tmp_path / "runs" / "demo_001" / "provenance" / "logs" / "manifest_smoke.stage.json"
+    )
+    base_manifest = {
+        "manifest_version": "0.1",
+        "run": {"run_id": "demo_001", "run_root": "runs/demo_001"},
+        "workflow": {
+            "operator_flow": [
+                {
+                    "stage": "run_simulation",
+                    "display_name": "Run simulation",
+                    "lifecycle_class": "factory",
+                    "display_order": 70,
+                    "status": "pass",
+                }
+            ]
+        },
+        "repositories": [
+            {
+                "name": "ansible-mvp",
+                "path": tmp_path.as_posix(),
+                "resolved_commit": "abc123",
+                "worktree_status": "clean",
+            }
+        ],
+        "simulation_layout": {
+            "run_root": "runs/demo_001",
+            "sim_run_root": "runs/demo_001/sim-run-root",
+            "provenance_root": "runs/demo_001/provenance",
+        },
+        "controlled_source_gate": {"status": "pass"},
+        "scheduler": {"mode": "mock_lsf"},
+        "inputs": [{"relative_path": "input/dirC/ex1.dat"}],
+        "runtime_scripts": [{"relative_path": "procs/run-script.sh"}],
+        "stages": [
+            {
+                "name": "run_simulation",
+                "display_name": "Run simulation",
+                "lifecycle_class": "factory",
+                "display_order": 70,
+                "operator_visible": True,
+                "status": "pass",
+            }
+        ],
+        "raw_simulation_outputs": [{"relative_path": "lists/dirC/sim-out.dat"}],
+        "derived_products": [{"relative_path": "products/extracted/required.csv"}],
+        "validations": [{"status": "pass"}],
+        "logs": [{"path": "logs/run_simulation.stdout.log"}],
+        "hash_policy": {"algorithm": "sha256"},
+        "notes": ["before-refresh"],
+    }
+    refreshed_manifest = dict(base_manifest)
+    refreshed_manifest["notes"] = ["after-refresh"]
+    refreshed_manifest["stages"] = [
+        *base_manifest["stages"],
+        {
+            "name": "manifest_smoke",
+            "display_name": "Verify manifest",
+            "lifecycle_class": "finalization",
+            "display_order": 140,
+            "operator_visible": False,
+            "status": "pass",
+        },
+    ]
+    manifest_path.parent.mkdir(parents=True)
+    manifest_path.write_text(yaml.safe_dump(base_manifest), encoding="utf-8")
+    monkeypatch.setattr(cli, "assemble_run_manifest", lambda **_: refreshed_manifest)
+
+    assert (
+        main(
+            [
+                "smoke-manifest",
+                str(manifest_path),
+                "--output",
+                str(smoke_output),
+                "--run-id",
+                "demo_001",
+                "--workspace-root",
+                str(tmp_path),
+                "--controlled-source-repo",
+                str(tmp_path / "controlled-source-demo"),
+                "--controlled-source-ref",
+                "controlled-source-demo-v0.1.0",
+                "--stage-output",
+                str(smoke_stage_output),
+            ]
+        )
+        == 0
+    )
+
+    smoke = json.loads(smoke_output.read_text(encoding="utf-8"))
+    final_manifest_bytes = manifest_path.read_bytes()
+    final_manifest = yaml.safe_load(final_manifest_bytes)
+    assert final_manifest["notes"] == ["after-refresh"]
+    assert smoke["manifest_sha256"] == hashlib.sha256(final_manifest_bytes).hexdigest()
 
 
 def test_cli_assembles_run_manifest_from_workflow_evidence(tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]

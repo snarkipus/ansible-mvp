@@ -93,6 +93,7 @@ The system SHALL provide a focused verification step that checks the generated m
 #### Scenario: Manifest smoke test passes
 - **WHEN** a clean synthetic run completes
 - **THEN** the smoke test verifies required manifest sections including `manifest_version`, `run`, `workflow`, `repositories`, `simulation_layout`, `controlled_source_gate`, `scheduler`, `inputs`, `runtime_scripts`, `stages`, `raw_simulation_outputs`, `derived_products`, `validations`, `logs`, `hash_policy`, and `notes`
+- **AND** `provenance/validations/manifest_smoke.json` records the SHA-256 of the final `provenance/manifest.yaml` artifact left on disk
 
 ### Requirement: SHA-256 hashes are recorded for MVP artifacts
 The system SHALL use SHA-256 for scripts, configuration, small inputs, extracted CSVs, and report products in the synthetic MVP.

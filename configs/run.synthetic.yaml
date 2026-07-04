@@ -104,7 +104,6 @@ scheduler:
   metadata_path: provenance/scheduler/submission.yaml
   require_real_lsf: false
 stage_defaults:
-  shell: bash
   fail_on_error: true
   log_directory: provenance/logs
 stages:

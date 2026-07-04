@@ -23,7 +23,7 @@ from provenance.git_state import (
     script_identity,
     tracked_file_state,
 )
-from provenance.hashing import hash_artifact
+from provenance.hashing import hash_artifact, sha256_file
 from provenance.inventory import InventoryRecord, inventory_files, with_sha256
 from provenance.manifest import (
     ManifestAssemblyInput,
@@ -775,13 +775,6 @@ def _cmd_smoke_manifest(args: argparse.Namespace) -> int:
     manifest = _read_yaml_mapping(args.manifest)
     missing = missing_required_sections(manifest)
     missing_key_values = missing_required_key_values(manifest)
-    payload = {
-        "status": "pass" if not missing and not missing_key_values else "fail",
-        "manifest": args.manifest.as_posix(),
-        "missing_required_sections": list(missing),
-        "missing_required_key_values": list(missing_key_values),
-    }
-    _write_json(payload, args.output)
     finished_at = _utc_now()
     passed = not missing and not missing_key_values
     if passed and args.run_id is not None and args.stage_output is not None:
@@ -793,6 +786,8 @@ def _cmd_smoke_manifest(args: argparse.Namespace) -> int:
             controlled_source_repo=args.controlled_source_repo,
         )
         if args.controlled_source_repo is not None and args.controlled_source_ref is not None:
+            # Refresh once so final manifest.yaml includes manifest_smoke stage evidence.
+            # The smoke result is written after this refresh and hashes that final file.
             refreshed = assemble_run_manifest(
                 config_path=args.config,
                 run_id=args.run_id,
@@ -801,6 +796,18 @@ def _cmd_smoke_manifest(args: argparse.Namespace) -> int:
                 controlled_source_ref=args.controlled_source_ref,
             )
             write_manifest(refreshed, args.manifest)
+            manifest = _read_yaml_mapping(args.manifest)
+            missing = missing_required_sections(manifest)
+            missing_key_values = missing_required_key_values(manifest)
+            passed = not missing and not missing_key_values
+    payload = {
+        "status": "pass" if passed else "fail",
+        "manifest": args.manifest.as_posix(),
+        "manifest_sha256": sha256_file(args.manifest),
+        "missing_required_sections": list(missing),
+        "missing_required_key_values": list(missing_key_values),
+    }
+    _write_json(payload, args.output)
     return 0 if passed else 1
 
 
