@@ -79,7 +79,7 @@ run-simulation: ## Execute the controlled synthetic simulation stage.
 		--run-id "$(RUN_ID)" \
 		--workspace-root . \
 		--controlled-source-repo "$(CONTROLLED_SOURCE_REPO)" \
-		--output "$(PROVENANCE_ROOT)/logs/run_simulation.stage.json"
+		--stage-output "$(PROVENANCE_ROOT)/logs/run_simulation.stage.json"
 
 extract-required: ## Produce the required extracted CSV from raw simulation outputs.
 	uv run provenance extract-required \
@@ -87,7 +87,7 @@ extract-required: ## Produce the required extracted CSV from raw simulation outp
 		--run-id "$(RUN_ID)" \
 		--workspace-root . \
 		--controlled-source-repo "$(CONTROLLED_SOURCE_REPO)" \
-		--output "$(PROVENANCE_ROOT)/logs/extract_required.stage.json"
+		--stage-output "$(PROVENANCE_ROOT)/logs/extract_required.stage.json"
 
 extract-ad-hoc: ## Produce the ad hoc extracted CSV from raw simulation outputs.
 	uv run provenance extract-ad-hoc \
@@ -95,7 +95,7 @@ extract-ad-hoc: ## Produce the ad hoc extracted CSV from raw simulation outputs.
 		--run-id "$(RUN_ID)" \
 		--workspace-root . \
 		--controlled-source-repo "$(CONTROLLED_SOURCE_REPO)" \
-		--output "$(PROVENANCE_ROOT)/logs/extract_ad_hoc.stage.json"
+		--stage-output "$(PROVENANCE_ROOT)/logs/extract_ad_hoc.stage.json"
 
 build-reports: ## Generate summary.xlsx, chart.png, and briefing.pptx derived reports.
 	uv run provenance build-reports \

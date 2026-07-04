@@ -126,7 +126,13 @@ def _build_parser() -> argparse.ArgumentParser:
     run_simulation.add_argument("--run-id", required=True)
     run_simulation.add_argument("--workspace-root", type=Path, default=Path("."))
     run_simulation.add_argument("--controlled-source-repo", type=Path, required=True)
-    run_simulation.add_argument("--output", type=Path, help="optional stage JSON output path")
+    run_simulation.add_argument(
+        "--stage-output",
+        "--output",
+        dest="output",
+        type=Path,
+        help="optional stage JSON output path",
+    )
     run_simulation.set_defaults(func=_cmd_run_simulation)
 
     extract_required = subparsers.add_parser(
@@ -136,7 +142,13 @@ def _build_parser() -> argparse.ArgumentParser:
     extract_required.add_argument("--run-id", required=True)
     extract_required.add_argument("--workspace-root", type=Path, default=Path("."))
     extract_required.add_argument("--controlled-source-repo", type=Path, required=True)
-    extract_required.add_argument("--output", type=Path, help="optional stage JSON output path")
+    extract_required.add_argument(
+        "--stage-output",
+        "--output",
+        dest="output",
+        type=Path,
+        help="optional stage JSON output path",
+    )
     extract_required.set_defaults(func=_cmd_extract_required)
 
     extract_ad_hoc = subparsers.add_parser(
@@ -146,7 +158,13 @@ def _build_parser() -> argparse.ArgumentParser:
     extract_ad_hoc.add_argument("--run-id", required=True)
     extract_ad_hoc.add_argument("--workspace-root", type=Path, default=Path("."))
     extract_ad_hoc.add_argument("--controlled-source-repo", type=Path, required=True)
-    extract_ad_hoc.add_argument("--output", type=Path, help="optional stage JSON output path")
+    extract_ad_hoc.add_argument(
+        "--stage-output",
+        "--output",
+        dest="output",
+        type=Path,
+        help="optional stage JSON output path",
+    )
     extract_ad_hoc.set_defaults(func=_cmd_extract_ad_hoc)
 
     build_reports = subparsers.add_parser(
