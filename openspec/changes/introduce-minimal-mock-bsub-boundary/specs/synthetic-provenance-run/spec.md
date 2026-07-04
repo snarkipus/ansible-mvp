@@ -98,4 +98,6 @@ The system SHALL support configurable local async timing so operator demos exerc
 
 #### Scenario: Controlled source delay contract changes explicitly
 - **WHEN** controlled-source templates change to support synthetic runtime delay
-- **THEN** bootstrap compatibility checks, default controlled-source refs, tests, and documentation are updated consistently rather than mutating the existing controlled-source tag contract silently
+- **THEN** the delay is owned by the controlled-source demo payload rather than a wrapper-owned scheduler invocation
+- **AND** bootstrap compatibility checks, default controlled-source refs, tests, and documentation are updated consistently rather than mutating the existing `controlled-source-demo-v0.1.0` tag contract silently
+- **AND** a new controlled-source demo tag such as `controlled-source-demo-v0.1.1` identifies the updated payload contract

@@ -64,7 +64,9 @@ The default operator demo should use configurable mock runtime delay settings so
 
 The configured delay range should be deterministic for a given `run_id` when jitter is enabled, and tests should override delay to subsecond deterministic values so quality gates remain fast.
 
-If the delay is added to controlled-source templates, the bootstrap compatibility contract and default controlled-source ref must move forward together. Do not silently mutate the existing `controlled-source-demo-v0.1.0` contract.
+The controlled runtime delay SHALL live in the controlled-source demo payload, preferably `procs/run-script.sh` or `scripts/synthetic_sim_engine.sh`, rather than in a wrapper-owned scheduler invocation. This keeps provenance semantics honest: the job takes time because the controlled workload takes time, not because the wrapper repository pretends scheduler latency exists.
+
+Because this changes the controlled-source payload contract, the bootstrap compatibility contract and default controlled-source ref must move forward together. Do not silently mutate the existing `controlled-source-demo-v0.1.0` contract; introduce a new controlled-source demo tag such as `controlled-source-demo-v0.1.1` and update defaults, tests, and documentation consistently.
 
 ### Manage local subprocesses as scheduler-owned jobs
 
@@ -104,10 +106,9 @@ Extraction stages must require terminal scheduler `DONE`, not just the raw outpu
 3. Update Make and Ansible stage order to call submit/wait/collect before extraction.
 4. Update run configuration and manifest assembly so scheduler evidence and payload evidence are linked.
 5. Update docs and tests for the async operator flow.
-6. If controlled-source templates change, update bootstrap compatibility checks, default refs, tests, and docs consistently.
+6. Update the controlled-source templates to own the runtime delay, create a new controlled-source demo contract tag such as `controlled-source-demo-v0.1.1`, and update bootstrap compatibility checks, default refs, tests, and docs consistently.
 7. Keep no backward-compatibility fallback for old generated run directories; run evidence is generated and fresh by default.
 
 ## Open Questions
 
 - Should `sync_dispatch` be implemented now as a narrow test mode, or deferred entirely until a concrete need appears?
-- Should the controlled runtime delay live in the controlled source demo script itself or in a controlled wrapper invocation owned by this repo?

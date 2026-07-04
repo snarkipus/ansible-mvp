@@ -4,7 +4,7 @@
 - [ ] 1.2 Update config validation tests to accept valid local async scheduler settings and reject malformed scheduler settings.
 - [ ] 1.3 Extend preflight/stage command validation so mock scheduler payload commands must resolve to approved controlled workflow code.
 - [ ] 1.4 Ensure `submit-mock-lsf`, `wait-mock-lsf`, and `collect-mock-lsf` remain approved wrapper Make targets.
-- [ ] 1.5 Decide the controlled runtime-delay location; if controlled-source templates change, update bootstrap compatibility, controlled-source tag/ref defaults, docs, and tests as one coherent contract change.
+- [ ] 1.5 Add controlled runtime-delay support to the controlled-source demo payload, bump the controlled-source demo contract tag/ref from `controlled-source-demo-v0.1.0` to a new tag such as `controlled-source-demo-v0.1.1`, and update bootstrap compatibility, docs, and tests as one coherent contract change.
 
 ## 2. Local Async Emulator
 
@@ -13,7 +13,7 @@
 - [ ] 2.3 Implement the scheduler-owned wrapper so it executes the payload and writes started/finished timestamps, exit code, and terminal `DONE`/`EXIT` state under `provenance/scheduler/`.
 - [ ] 2.4 Implement `wait_mock_lsf` polling with non-terminal state observation, terminal state file detection, timeout handling, missing PID handling, vanished-process evidence, and stale non-terminal state handling.
 - [ ] 2.5 Implement `collect_mock_lsf` accounting output that requires terminal state and links scheduler state to payload execution evidence.
-- [ ] 2.6 Add deterministic configured runtime-delay support in the controlled synthetic payload path or controlled invocation path, with fast test overrides and run-id-seeded jitter when a range is configured.
+- [ ] 2.6 Add deterministic configured runtime-delay support in the controlled synthetic payload path, with fast test overrides and run-id-seeded jitter when a range is configured.
 - [ ] 2.7 Ensure subprocess stdout/stderr are written to files without pipe-drain deadlocks and that timeout cleanup attempts process-group termination before recording timeout/orphan evidence.
 
 ## 3. Orchestration and Stage Evidence
