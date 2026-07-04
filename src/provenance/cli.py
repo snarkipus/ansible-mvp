@@ -805,6 +805,9 @@ def _cmd_assemble_run_manifest(args: argparse.Namespace) -> int:
         finished_at=finished_at,
         controlled_source_repo=args.controlled_source_repo,
     )
+    # Reassemble once so the final manifest includes its own assembly-stage
+    # evidence. The manifest cannot contain a hash of itself; smoke validation
+    # records the final manifest hash in a sibling receipt instead.
     manifest = assemble_run_manifest(
         config_path=args.config,
         run_id=args.run_id,
@@ -835,6 +838,8 @@ def _cmd_smoke_manifest(args: argparse.Namespace) -> int:
         if args.controlled_source_repo is not None and args.controlled_source_ref is not None:
             # Refresh once so final manifest.yaml includes manifest_smoke stage evidence.
             # The smoke result is written after this refresh and hashes that final file.
+            # If the refreshed manifest fails validation, the command exits nonzero;
+            # the already-written stage attempt remains evidence of the attempted check.
             refreshed = assemble_run_manifest(
                 config_path=args.config,
                 run_id=args.run_id,

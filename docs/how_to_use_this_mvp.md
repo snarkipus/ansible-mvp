@@ -302,6 +302,15 @@ extraction stages capture observed return codes and stdout/stderr directly. Do
 not treat support-stage evidence as a production-grade scheduler or shell audit
 trail.
 
+Extraction stages execute scripts from the live controlled-source worktree after
+preflight has verified the requested ref and clean state. The local MVP assumes
+the worktree remains unchanged between Make targets; it does not re-hash scripts
+at execution time or model a production-grade time-of-check/time-of-use lock.
+
+Manifest evidence may include absolute local host paths. This MVP is intended as
+host-bound local evidence, not a portable archive format, so those paths are
+accepted context rather than normalized or redacted metadata.
+
 Known deferred limitations are tracked as follow-up beads rather than implemented in
 this MVP: production real-LSF integration, safe failed-run resume semantics,
 long-term artifact archival/formal schema validation, and production-scale hash
