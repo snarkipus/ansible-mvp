@@ -21,7 +21,7 @@ def test_preflight_passes_for_clean_controlled_repositories(tmp_path: Path) -> N
         config_path=config,
         wrapper_repo=wrapper,
         controlled_source_repo=controlled,
-        controlled_source_ref="controlled-source-demo-v0.1.0",
+        controlled_source_ref="controlled-source-demo-v0.1.1",
     )
 
     assert result.status == "pass"
@@ -45,7 +45,7 @@ def test_preflight_fails_for_dirty_wrapper_controlled_path_but_not_untracked_run
             config_path=config,
             wrapper_repo=wrapper,
             controlled_source_repo=controlled,
-            controlled_source_ref="controlled-source-demo-v0.1.0",
+            controlled_source_ref="controlled-source-demo-v0.1.1",
         )
 
     message = str(error.value)
@@ -111,10 +111,29 @@ def test_preflight_rejects_shell_style_stage_commands(
             config_path=config,
             wrapper_repo=wrapper,
             controlled_source_repo=controlled,
-            controlled_source_ref="controlled-source-demo-v0.1.0",
+            controlled_source_ref="controlled-source-demo-v0.1.1",
         )
 
     assert expected_message in str(error.value)
+
+
+def test_preflight_rejects_uncontrolled_scheduler_payload_command(tmp_path: Path) -> None:
+    wrapper, controlled, config = _prepare_repositories(tmp_path)
+    config_payload = yaml.safe_load(config.read_text(encoding="utf-8"))
+    config_payload["stages"][1]["command_kind"] = "wrapper_make_target"
+    config_payload["stages"][1]["command"] = "make run-simulation"
+    config_payload["stages"][1]["approved_command_path"] = "Makefile"
+    config.write_text(yaml.safe_dump(config_payload, sort_keys=False), encoding="utf-8")
+
+    with pytest.raises(PreflightError) as error:
+        run_preflight(
+            config_path=config,
+            wrapper_repo=wrapper,
+            controlled_source_repo=controlled,
+            controlled_source_ref="controlled-source-demo-v0.1.1",
+        )
+
+    assert "scheduler payload" in str(error.value)
 
 
 def _prepare_repositories(tmp_path: Path) -> tuple[Path, Path, Path]:
@@ -136,7 +155,7 @@ def _prepare_repositories(tmp_path: Path) -> tuple[Path, Path, Path]:
     _git(wrapper, "commit", "-m", "wrapper")
     _git(controlled, "add", "procs/run-script.sh")
     _git(controlled, "commit", "-m", "controlled")
-    _git(controlled, "tag", "controlled-source-demo-v0.1.0")
+    _git(controlled, "tag", "controlled-source-demo-v0.1.1")
 
     config = wrapper / "run.synthetic.yaml"
     config.write_text(yaml.safe_dump(_config_payload(), sort_keys=False), encoding="utf-8")
@@ -167,6 +186,28 @@ def _config_payload() -> dict[str, Any]:
             "wrapper": ["Makefile"],
             "controlled_source": ["procs/run-script.sh"],
         },
+        "scheduler": {
+            "mode": "mock_lsf",
+            "emulator_execution_mode": "local_async",
+            "metadata_path": "provenance/scheduler/submission.yaml",
+            "require_real_lsf": False,
+            "payload_stage": "run_simulation",
+            "payload_command": "procs/run-script.sh",
+            "payload_command_kind": "materialized_controlled_script",
+            "payload_approved_command_path": "procs/run-script.sh",
+            "poll_interval_seconds": 0.1,
+            "wait_timeout_seconds": 1,
+            "runtime_delay": {
+                "min_seconds": 0,
+                "max_seconds": 0,
+                "jitter": "deterministic_run_id",
+            },
+            "approved_make_targets": [
+                "submit-mock-lsf",
+                "wait-mock-lsf",
+                "collect-mock-lsf",
+            ],
+        },
         "stages": [
             {
                 "name": "preflight",
@@ -177,7 +218,7 @@ def _config_payload() -> dict[str, Any]:
             },
             {
                 "name": "run_simulation",
-                "command": "sim-run-root/procs/run-script.sh",
+                "command": "procs/run-script.sh",
                 "command_kind": "materialized_controlled_script",
                 "approved_command_path": "procs/run-script.sh",
                 "expected_controlled_scripts": ["run_script"],

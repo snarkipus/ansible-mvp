@@ -107,6 +107,7 @@ def run_preflight(
         config, controlled_repo_root, controlled_state.is_git_worktree, failures
     )
     stages = _validate_stages(config, script_identities, failures)
+    _validate_scheduler_payload(config, failures)
 
     if failures:
         raise PreflightError("preflight failed: " + "; ".join(failures))
@@ -242,6 +243,58 @@ def _validate_stages(
             }
         )
     return payloads
+
+
+def _validate_scheduler_payload(config: dict[str, Any], failures: list[str]) -> None:
+    if "scheduler" not in config:
+        return
+    scheduler = _mapping(config.get("scheduler"), "scheduler")
+    payload_stage_name = scheduler.get("payload_stage")
+    if not isinstance(payload_stage_name, str) or not payload_stage_name:
+        failures.append("scheduler.payload_stage must identify the controlled payload stage")
+        return
+
+    payload_stage: dict[str, Any] | None = None
+    for raw_stage in _list(config.get("stages"), "stages"):
+        stage = _mapping(raw_stage, "stages[]")
+        if stage.get("name") == payload_stage_name:
+            payload_stage = stage
+            break
+    if payload_stage is None:
+        failures.append(f"scheduler payload stage is not configured: {payload_stage_name}")
+        return
+
+    expected_values = {
+        "command": scheduler.get("payload_command"),
+        "command_kind": scheduler.get("payload_command_kind"),
+        "approved_command_path": scheduler.get("payload_approved_command_path"),
+    }
+    for field_name, expected in expected_values.items():
+        if payload_stage.get(field_name) != expected:
+            failures.append(
+                f"scheduler payload {field_name} does not match stage {payload_stage_name}: "
+                f"{expected!r} != {payload_stage.get(field_name)!r}"
+            )
+
+    if payload_stage.get("command_kind") not in {
+        "controlled_source_script",
+        "materialized_controlled_script",
+    }:
+        failures.append(
+            f"scheduler payload stage {payload_stage_name} must resolve to controlled workflow code"
+        )
+
+    approved_paths = _mapping(config.get("approved_command_paths"), "approved_command_paths")
+    controlled_paths = set(
+        _string_list(
+            approved_paths.get("controlled_source"), "approved_command_paths.controlled_source"
+        )
+    )
+    approved_path = payload_stage.get("approved_command_path")
+    if approved_path not in controlled_paths:
+        failures.append(
+            f"scheduler payload stage {payload_stage_name} uses uncontrolled path: {approved_path}"
+        )
 
 
 def _validate_command_matches_approved_path(

@@ -23,14 +23,14 @@
 - Mock LSF only for the MVP; do not require `bsub`, `bjobs`, `bhist`, `bacct`, or a real scheduler.
 
 ## Commands
-- Implemented bootstrap command: `make bootstrap-controlled-source` creates or verifies sibling `../controlled-source-demo` with tag `controlled-source-demo-v0.1.0`.
+- Implemented bootstrap command: `make bootstrap-controlled-source` creates or verifies sibling `../controlled-source-demo` with tag `controlled-source-demo-v0.1.1`.
 - Implemented local run command:
   ```bash
   ansible-playbook ansible/playbooks/run_synthetic_workflow.yml \
     -i ansible/inventory/localhost.ini \
     -e run_id=demo_001 \
     -e controlled_source_repo=../controlled-source-demo \
-    -e controlled_source_ref=controlled-source-demo-v0.1.0
+    -e controlled_source_ref=controlled-source-demo-v0.1.1
   ```
 - `make check` is the primary code quality gate. Maintainer workflow changes should also run strict OpenSpec validation and `bd lint --json`.
 

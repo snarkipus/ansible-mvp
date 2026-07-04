@@ -64,7 +64,7 @@ make bootstrap-controlled-source
 
 This command is intentionally strict. It creates `../controlled-source-demo` when
 missing, or verifies that an existing repo is clean, compatible, has the expected
-tracked files, and has tag `controlled-source-demo-v0.1.0`.
+tracked files, and has tag `controlled-source-demo-v0.1.1`.
 
 Treat this as local demo bootstrap only. A production-shaped factory run should
 resolve and verify existing controlled sources, not create upstream source repos.
@@ -78,7 +78,7 @@ ansible-playbook ansible/playbooks/run_synthetic_workflow.yml \
   -i ansible/inventory/localhost.ini \
   -e run_id=demo_001 \
   -e controlled_source_repo=../controlled-source-demo \
-  -e controlled_source_ref=controlled-source-demo-v0.1.0
+  -e controlled_source_ref=controlled-source-demo-v0.1.1
 ```
 
 For focused debugging, individual Make targets can also be run, but keep the same
@@ -250,6 +250,13 @@ When adding a new stage or artifact:
 - **Real LSF tools are absent:** this is expected for the MVP; mock scheduler mode
   is used instead of `bsub`, `bjobs`, `bhist`, or `bacct`.
 
+The default controlled-source tag is `controlled-source-demo-v0.1.1`. This tag
+adds payload-owned deterministic runtime-delay support through
+`SYNTHETIC_SIM_RUNTIME_DELAY_SECONDS` or the
+`SYNTHETIC_SIM_RUNTIME_DELAY_MIN_SECONDS` / `MAX_SECONDS` range. The wrapper
+does not add fake scheduler latency; async mock-scheduler runs should pass delay
+configuration into the controlled payload.
+
 ## What Not to Change
 
 - Do not place provenance evidence, extracted CSVs, reports, or manifests inside
@@ -289,7 +296,7 @@ ansible-playbook ansible/playbooks/run_synthetic_workflow.yml \
   -i ansible/inventory/localhost.ini \
   -e run_id=final_verification_20260704_hardening2 \
   -e controlled_source_repo=../controlled-source-demo \
-  -e controlled_source_ref=controlled-source-demo-v0.1.0
+  -e controlled_source_ref=controlled-source-demo-v0.1.1
 ```
 
 The bootstrap, quality gate, and clean synthetic workflow completed successfully.

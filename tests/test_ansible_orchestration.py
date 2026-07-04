@@ -29,7 +29,7 @@ def test_group_vars_define_documented_defaults_and_stage_order() -> None:
 
     assert group_vars["default_run_id"] == run_config["run"]["default_run_id"]
     assert group_vars["default_controlled_source_repo"] == "../controlled-source-demo"
-    assert group_vars["default_controlled_source_ref"] == "controlled-source-demo-v0.1.0"
+    assert group_vars["default_controlled_source_ref"] == "controlled-source-demo-v0.1.1"
     assert group_vars["workflow_stage_targets"] == [
         "preflight",
         "prepare-workspace",

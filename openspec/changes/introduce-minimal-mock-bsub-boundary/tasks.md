@@ -1,10 +1,10 @@
 ## 1. Scheduler Configuration and Gate
 
-- [ ] 1.1 Add scheduler config fields for `emulator_execution_mode`, payload command identity, poll interval, wait timeout, and deterministic mock runtime delay.
-- [ ] 1.2 Update config validation tests to accept valid local async scheduler settings and reject malformed scheduler settings.
-- [ ] 1.3 Extend preflight/stage command validation so mock scheduler payload commands must resolve to approved controlled workflow code.
-- [ ] 1.4 Ensure `submit-mock-lsf`, `wait-mock-lsf`, and `collect-mock-lsf` remain approved wrapper Make targets.
-- [ ] 1.5 Add controlled runtime-delay support to the controlled-source demo payload, bump the controlled-source demo contract tag/ref from `controlled-source-demo-v0.1.0` to a new tag such as `controlled-source-demo-v0.1.1`, and update bootstrap compatibility, docs, and tests as one coherent contract change.
+- [x] 1.1 Add scheduler config fields for `emulator_execution_mode`, payload command identity, poll interval, wait timeout, and deterministic mock runtime delay.
+- [x] 1.2 Update config validation tests to accept valid local async scheduler settings and reject malformed scheduler settings.
+- [x] 1.3 Extend preflight/stage command validation so mock scheduler payload commands must resolve to approved controlled workflow code.
+- [x] 1.4 Ensure `submit-mock-lsf`, `wait-mock-lsf`, and `collect-mock-lsf` remain approved wrapper Make targets.
+- [x] 1.5 Add controlled runtime-delay support to the controlled-source demo payload, bump the controlled-source demo contract tag/ref from `controlled-source-demo-v0.1.0` to a new tag such as `controlled-source-demo-v0.1.1`, and update bootstrap compatibility, docs, and tests as one coherent contract change.
 
 ## 2. Local Async Emulator
 

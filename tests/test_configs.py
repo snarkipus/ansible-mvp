@@ -82,7 +82,24 @@ def test_run_config_links_layout_hash_policy_and_validation_expectations() -> No
     assert "products/extracted" in config["layout"]["provenance_directories"]
     assert config["hash_policy"]["algorithm"] == "sha256"
     assert config["scheduler"]["mode"] == "mock_lsf"
+    assert config["scheduler"]["emulator_execution_mode"] == "local_async"
     assert config["scheduler"]["require_real_lsf"] is False
+    assert config["scheduler"]["payload_stage"] == "run_simulation"
+    assert config["scheduler"]["payload_command"] == "procs/run-script.sh"
+    assert config["scheduler"]["payload_command_kind"] == "materialized_controlled_script"
+    assert config["scheduler"]["payload_approved_command_path"] == "procs/run-script.sh"
+    assert config["scheduler"]["poll_interval_seconds"] > 0
+    assert (
+        config["scheduler"]["wait_timeout_seconds"] >= config["scheduler"]["poll_interval_seconds"]
+    )
+    assert config["scheduler"]["runtime_delay"] == {
+        "min_seconds": 1.0,
+        "max_seconds": 2.0,
+        "jitter": "deterministic_run_id",
+    }
+    assert {"submit-mock-lsf", "wait-mock-lsf", "collect-mock-lsf"}.issubset(
+        config["scheduler"]["approved_make_targets"]
+    )
 
     required_extract = config["validations"]["required_extract"]
     assert required_extract["config_path"] == "configs/expected_shape.required_extract.yaml"
@@ -112,6 +129,34 @@ def test_config_loader_rejects_unsupported_schema_version(tmp_path: Path) -> Non
         assert "schema_version must be '0.1'" in str(error)
     else:  # pragma: no cover - assertion guard
         raise AssertionError("unsupported schema_version should fail")
+
+
+def test_config_loader_rejects_malformed_scheduler_settings(tmp_path: Path) -> None:
+    config = _load_yaml("configs/run.synthetic.yaml")
+    config["scheduler"]["emulator_execution_mode"] = "sync_dispatch"
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+
+    try:
+        read_config_mapping(config_path)
+    except ValueError as error:
+        assert "scheduler.emulator_execution_mode must be 'local_async'" in str(error)
+    else:  # pragma: no cover - assertion guard
+        raise AssertionError("malformed scheduler settings should fail")
+
+
+def test_config_loader_rejects_missing_scheduler_settings(tmp_path: Path) -> None:
+    config = _load_yaml("configs/run.synthetic.yaml")
+    del config["scheduler"]["emulator_execution_mode"]
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+
+    try:
+        read_config_mapping(config_path)
+    except ValueError as error:
+        assert "scheduler.emulator_execution_mode must be a non-empty string" in str(error)
+    else:  # pragma: no cover - assertion guard
+        raise AssertionError("missing scheduler settings should fail")
 
 
 def test_run_config_stages_declare_lifecycle_metadata() -> None:

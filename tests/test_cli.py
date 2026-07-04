@@ -41,7 +41,7 @@ def test_cli_inventory_pre_writes_input_and_script_inventories(tmp_path: Path, c
                 "artifacts": [
                     {
                         "source_repository": "/controlled-source-demo",
-                        "source_ref": "controlled-source-demo-v0.1.0",
+                        "source_ref": "controlled-source-demo-v0.1.1",
                         "source_resolved_commit": "abc123",
                         "source_path": "fixtures/controlled_inputs/dirC/ex1.dat",
                         "destination_path": "runs/demo_001/sim-run-root/input/dirC/ex1.dat",
@@ -59,7 +59,7 @@ def test_cli_inventory_pre_writes_input_and_script_inventories(tmp_path: Path, c
                 "artifacts": [
                     {
                         "source_repository": "/controlled-source-demo",
-                        "source_ref": "controlled-source-demo-v0.1.0",
+                        "source_ref": "controlled-source-demo-v0.1.1",
                         "source_resolved_commit": "abc123",
                         "source_path": "procs/run-script.sh",
                         "destination_path": "runs/demo_001/sim-run-root/procs/run-script.sh",
@@ -460,7 +460,7 @@ def test_cli_manifest_smoke_hashes_refreshed_final_manifest(
                 "--controlled-source-repo",
                 str(tmp_path / "controlled-source-demo"),
                 "--controlled-source-ref",
-                "controlled-source-demo-v0.1.0",
+                "controlled-source-demo-v0.1.1",
                 "--stage-output",
                 str(smoke_stage_output),
             ]
@@ -495,7 +495,7 @@ def test_cli_assembles_run_manifest_from_workflow_evidence(tmp_path: Path, capsy
             "status": "pass",
             "controlled_source_repo": {
                 "path": controlled_repo.as_posix(),
-                "ref": "controlled-source-demo-v0.1.0",
+                "ref": "controlled-source-demo-v0.1.1",
             },
             "controlled_scripts": [{"name": "run_script", "relative_path": "procs/run-script.sh"}],
         },
@@ -595,7 +595,7 @@ def test_cli_assembles_run_manifest_from_workflow_evidence(tmp_path: Path, capsy
                 "--controlled-source-repo",
                 str(controlled_repo),
                 "--controlled-source-ref",
-                "controlled-source-demo-v0.1.0",
+                "controlled-source-demo-v0.1.1",
                 "--output",
                 str(manifest_path),
             ]
@@ -607,7 +607,7 @@ def test_cli_assembles_run_manifest_from_workflow_evidence(tmp_path: Path, capsy
     manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
     assert tuple(manifest)[: len(REQUIRED_TOP_LEVEL_SECTIONS)] == REQUIRED_TOP_LEVEL_SECTIONS
     assert manifest["run"]["run_id"] == "demo_001"
-    assert manifest["repositories"][1]["requested_ref"] == "controlled-source-demo-v0.1.0"
+    assert manifest["repositories"][1]["requested_ref"] == "controlled-source-demo-v0.1.1"
     assert manifest["repositories"][1]["tracked_script_paths"] == [
         "procs/run-script.sh",
         "scripts/synthetic_sim_engine.sh",
@@ -657,7 +657,7 @@ def _init_controlled_source_repo(path: Path) -> None:
         stdout=subprocess.DEVNULL,
     )
     subprocess.run(
-        ["git", "tag", "controlled-source-demo-v0.1.0"],
+        ["git", "tag", "controlled-source-demo-v0.1.1"],
         cwd=path,
         check=True,
         stdout=subprocess.DEVNULL,

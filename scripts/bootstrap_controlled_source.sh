@@ -8,7 +8,7 @@ fixture_source_dir="$project_root/templates/controlled-source-demo/fixtures/cont
 proc_source_dir="$project_root/templates/controlled-source-demo/procs"
 script_source_dir="$project_root/templates/controlled-source-demo/scripts"
 template_root="$project_root/templates/controlled-source-demo"
-expected_tag=controlled-source-demo-v0.1.0
+expected_tag=controlled-source-demo-v0.1.1
 
 expected_files=(
   fixtures/controlled_inputs/dirA/ex1.dat
@@ -90,6 +90,23 @@ verify_existing_controlled_source_compatibility() {
   printf 'Verified controlled source compatibility for %s at %s\n' "$repo_display" "$resolved_commit"
 }
 
+existing_controlled_source_matches_template() {
+  local relative_path tracked_mode
+  for relative_path in "${expected_files[@]}"; do
+    [[ -f "$controlled_source_repo/$relative_path" ]] || return 1
+    git -C "$controlled_source_repo" ls-files --error-unmatch -- "$relative_path" >/dev/null 2>&1 || return 1
+    cmp -s -- "$template_root/$relative_path" "$controlled_source_repo/$relative_path" || return 1
+    if is_expected_executable "$relative_path"; then
+      read -r tracked_mode _ < <(git -C "$controlled_source_repo" ls-files --stage -- "$relative_path")
+      [[ "$tracked_mode" == "100755" ]] || return 1
+    fi
+  done
+  git -C "$controlled_source_repo" rev-parse --verify --quiet "refs/tags/$expected_tag" >/dev/null || return 1
+  resolved_commit=$(git -C "$controlled_source_repo" rev-parse HEAD)
+  tag_commit=$(git -C "$controlled_source_repo" rev-list -n 1 "$expected_tag")
+  [[ "$tag_commit" == "$resolved_commit" ]]
+}
+
 repo_physical_path() {
   local target=$1
   if [[ -d "$target" ]]; then
@@ -141,11 +158,15 @@ else
   fi
 
   printf 'Verified clean controlled source Git repository at %s\n' "$repo_display"
-  verify_existing_controlled_source_compatibility
-  exit 0
+  if existing_controlled_source_matches_template; then
+    verify_existing_controlled_source_compatibility
+    exit 0
+  fi
+  printf 'Updating controlled source demo to compatibility contract %s\n' "$expected_tag"
 fi
 
 mkdir -p -- "$controlled_source_repo/fixtures"
+rm -rf -- "$controlled_source_repo/fixtures/controlled_inputs"
 cp -R -- "$fixture_source_dir" "$controlled_source_repo/fixtures/"
 
 mkdir -p -- "$controlled_source_repo/procs" "$controlled_source_repo/scripts"

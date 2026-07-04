@@ -10,7 +10,7 @@ import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
-CONTROLLED_REF = "controlled-source-demo-v0.1.0"
+CONTROLLED_REF = "controlled-source-demo-v0.1.1"
 
 
 def test_clean_synthetic_workflow_smoke_generates_manifest_reports_and_validation(

@@ -55,8 +55,25 @@ def _write_config(path: Path) -> None:
                 },
                 "scheduler": {
                     "mode": "mock_lsf",
+                    "emulator_execution_mode": "local_async",
                     "metadata_path": "provenance/scheduler/submission.yaml",
                     "require_real_lsf": False,
+                    "poll_interval_seconds": 0.1,
+                    "wait_timeout_seconds": 1.0,
+                    "payload_stage": "run_simulation",
+                    "payload_command": "procs/run-script.sh",
+                    "payload_command_kind": "materialized_controlled_script",
+                    "payload_approved_command_path": "procs/run-script.sh",
+                    "runtime_delay": {
+                        "min_seconds": 0.0,
+                        "max_seconds": 0.0,
+                        "jitter": "deterministic_run_id",
+                    },
+                    "approved_make_targets": [
+                        "submit-mock-lsf",
+                        "wait-mock-lsf",
+                        "collect-mock-lsf",
+                    ],
                 },
                 "stages": [
                     {
@@ -216,7 +233,7 @@ def test_materialize_inputs_copies_repeated_groups_and_records_hashes(tmp_path: 
         run_id="demo_003",
         workspace_root=tmp_path,
         controlled_source_repo=controlled_repo,
-        controlled_source_ref="controlled-source-demo-v0.1.0",
+        controlled_source_ref="controlled-source-demo-v0.1.1",
     )
 
     assert len(result.artifacts) == 9
@@ -257,7 +274,7 @@ def test_cli_materialize_procs_copies_runtime_script_and_writes_evidence(tmp_pat
                 "--controlled-source-repo",
                 str(controlled_repo),
                 "--controlled-source-ref",
-                "controlled-source-demo-v0.1.0",
+                "controlled-source-demo-v0.1.1",
                 "--output",
                 str(output_path),
             ]
@@ -344,7 +361,7 @@ def test_run_synthetic_simulation_writes_raw_output_and_stage_evidence(
         run_id="demo_007",
         workspace_root=tmp_path,
         controlled_source_repo=controlled_repo,
-        controlled_source_ref="controlled-source-demo-v0.1.0",
+        controlled_source_ref="controlled-source-demo-v0.1.1",
     )
     assert (
         main(
@@ -359,7 +376,7 @@ def test_run_synthetic_simulation_writes_raw_output_and_stage_evidence(
                 "--controlled-source-repo",
                 str(controlled_repo),
                 "--controlled-source-ref",
-                "controlled-source-demo-v0.1.0",
+                "controlled-source-demo-v0.1.1",
             ]
         )
         == 0
@@ -405,7 +422,7 @@ def test_required_extraction_writes_derived_csv_outside_sim_run_root_and_stage_e
         run_id="demo_008",
         workspace_root=tmp_path,
         controlled_source_repo=controlled_repo,
-        controlled_source_ref="controlled-source-demo-v0.1.0",
+        controlled_source_ref="controlled-source-demo-v0.1.1",
     )
     main(
         [
@@ -419,7 +436,7 @@ def test_required_extraction_writes_derived_csv_outside_sim_run_root_and_stage_e
             "--controlled-source-repo",
             str(controlled_repo),
             "--controlled-source-ref",
-            "controlled-source-demo-v0.1.0",
+            "controlled-source-demo-v0.1.1",
         ]
     )
     run_synthetic_simulation(
@@ -699,7 +716,7 @@ def _create_controlled_source_repo(path: Path) -> Path:
         "-m",
         "init",
     )
-    _git(path, "tag", "controlled-source-demo-v0.1.0")
+    _git(path, "tag", "controlled-source-demo-v0.1.1")
     return path
 
 

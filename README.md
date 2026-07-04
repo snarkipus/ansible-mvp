@@ -51,7 +51,7 @@ flowchart TD
     subgraph controlled["Controlled source repo: ../controlled-source-demo"]
         fixtures["fixtures/controlled_inputs<br/>dirA/dirB/dirC ex*.dat"]
         scripts["Git-tracked scripts<br/>procs/run-script.sh<br/>scripts/synthetic_sim_engine.sh<br/>scripts/extract_required.pl<br/>scripts/ad_hoc_extract.py"]
-        tag["clean resolved ref<br/>controlled-source-demo-v0.1.0"]
+        tag["clean resolved ref<br/>controlled-source-demo-v0.1.1"]
     end
 
     preflight["Hard preflight gate<br/>clean repos, resolved refs, tracked scripts,<br/>approved command paths"]
@@ -236,7 +236,7 @@ ansible-playbook ansible/playbooks/run_synthetic_workflow.yml \
   -i ansible/inventory/localhost.ini \
   -e run_id=demo_001 \
   -e controlled_source_repo=../controlled-source-demo \
-  -e controlled_source_ref=controlled-source-demo-v0.1.0
+  -e controlled_source_ref=controlled-source-demo-v0.1.1
 ```
 
 Use a fresh `run_id` for each full Ansible run. Preflight fails before writing
@@ -288,6 +288,8 @@ make prepare-workspace
 make materialize-inputs
 make materialize-procs
 make submit-mock-lsf
+make wait-mock-lsf
+make collect-mock-lsf
 make run-simulation
 make extract-required
 make extract-ad-hoc
@@ -305,7 +307,7 @@ make check
 make clean
 ```
 
-The Ansible playbook invokes the workflow Make targets in the exact order configured by `workflow_stage_targets` in `ansible/inventory/group_vars/all.yml`, which is the source of truth for execution order:
+The run configuration (`configs/run.synthetic.yaml`) is the source of truth for stage order. The current Ansible inventory mirrors that order until the async scheduler stage-list helper is added:
 
 ```text
 preflight -> prepare-workspace -> materialize-inputs -> materialize-procs
@@ -331,6 +333,17 @@ Before execution, `make preflight` verifies:
 - required scripts are tracked by Git,
 - required scripts are addressed by repo-relative paths,
 - no stage executes untracked scripts from arbitrary filesystem locations.
+- the mock scheduler payload command resolves to the approved controlled
+  materialized runtime script (`procs/run-script.sh`) rather than an ad hoc local
+  command.
+
+The default controlled-source contract is `controlled-source-demo-v0.1.1`. The
+bootstrap command creates that tag for new demo repositories or updates a clean
+existing demo repository to the new template without rewriting the older
+`controlled-source-demo-v0.1.0` tag. The v0.1.1 payload accepts controlled
+runtime-delay environment values so future local async scheduler runs can make
+submit return before payload completion without adding fake wrapper-owned
+scheduler latency.
 
 The manifest records:
 

@@ -5,7 +5,7 @@
 
 RUN_ID ?= demo_001
 CONTROLLED_SOURCE_REPO ?= ../controlled-source-demo
-CONTROLLED_SOURCE_REF ?= controlled-source-demo-v0.1.0
+CONTROLLED_SOURCE_REF ?= controlled-source-demo-v0.1.1
 RUN_ROOT_POLICY ?= fresh
 PYTHON_PACKAGE := src/provenance
 RUN_ROOT := runs/$(RUN_ID)
@@ -13,7 +13,7 @@ PROVENANCE_ROOT := $(RUN_ROOT)/provenance
 
 .PHONY: help \
 	bootstrap-controlled-source preflight prepare-workspace \
-	materialize-inputs materialize-procs submit-mock-lsf run-simulation \
+	materialize-inputs materialize-procs submit-mock-lsf wait-mock-lsf collect-mock-lsf run-simulation \
 	extract-required extract-ad-hoc build-reports inventory-pre inventory-post \
 	validate manifest manifest-smoke format lint typecheck test check clean
 
@@ -72,6 +72,14 @@ submit-mock-lsf: ## Write mock LSF scheduler metadata without requiring real LSF
 		--workspace-root . \
 		--output "$(PROVENANCE_ROOT)/scheduler/submission.yaml" \
 		--stage-output "$(PROVENANCE_ROOT)/logs/submit_mock_lsf.stage.json"
+
+wait-mock-lsf: ## Wait for mock LSF terminal state (implemented by async scheduler change).
+	@printf 'wait-mock-lsf is not implemented yet; see ansible-mvp-1s3.4.\n' >&2
+	@exit 2
+
+collect-mock-lsf: ## Collect mock LSF accounting evidence (implemented by async scheduler change).
+	@printf 'collect-mock-lsf is not implemented yet; see ansible-mvp-1s3.4.\n' >&2
+	@exit 2
 
 run-simulation: ## Execute the controlled synthetic simulation stage.
 	uv run provenance run-simulation \

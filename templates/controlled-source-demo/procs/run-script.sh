@@ -4,6 +4,8 @@ set -euo pipefail
 # Runtime entrypoint copied into sim-run-root/procs/run-script.sh.
 # It delegates to the tracked controlled source simulation engine while keeping
 # the simulation working directory as the output root.
+# Optional SYNTHETIC_SIM_RUNTIME_DELAY_* environment values are interpreted by
+# the controlled engine, so observed runtime belongs to the controlled payload.
 
 script_dir=$(cd "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 

@@ -9,6 +9,8 @@ PUBLIC_TARGETS = {
     "materialize-inputs",
     "materialize-procs",
     "submit-mock-lsf",
+    "wait-mock-lsf",
+    "collect-mock-lsf",
     "run-simulation",
     "extract-required",
     "extract-ad-hoc",

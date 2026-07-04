@@ -80,9 +80,9 @@ def test_assemble_manifest_connects_core_provenance_sections() -> None:
                     {
                         "name": "controlled-source-demo",
                         "path": Path("../controlled-source-demo"),
-                        "requested_ref": "controlled-source-demo-v0.1.0",
+                        "requested_ref": "controlled-source-demo-v0.1.1",
                         "resolved_commit": "0" * 40,
-                        "describe": "controlled-source-demo-v0.1.0",
+                        "describe": "controlled-source-demo-v0.1.1",
                         "worktree_status": "clean",
                         "tracked_script_paths": ["procs/run-script.sh"],
                     },

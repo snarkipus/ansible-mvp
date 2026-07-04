@@ -36,7 +36,7 @@ repositories:
     path_variable: controlled_source_repo
     default_path: ../controlled-source-demo
     ref_variable: controlled_source_ref
-    default_ref: controlled-source-demo-v0.1.0
+    default_ref: controlled-source-demo-v0.1.1
     require_git_worktree: true
     require_clean_worktree: true
 layout:
@@ -105,8 +105,23 @@ materialization:
     - run_script
 scheduler:
   mode: mock_lsf
+  emulator_execution_mode: local_async
   metadata_path: provenance/scheduler/submission.yaml
   require_real_lsf: false
+  payload_stage: run_simulation
+  payload_command: procs/run-script.sh
+  payload_command_kind: materialized_controlled_script
+  payload_approved_command_path: procs/run-script.sh
+  poll_interval_seconds: 0.25
+  wait_timeout_seconds: 30
+  runtime_delay:
+    min_seconds: 1.0
+    max_seconds: 2.0
+    jitter: deterministic_run_id
+  approved_make_targets:
+    - submit-mock-lsf
+    - wait-mock-lsf
+    - collect-mock-lsf
 stage_defaults:
   fail_on_error: true
   log_directory: provenance/logs
