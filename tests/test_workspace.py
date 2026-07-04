@@ -145,6 +145,27 @@ def _set_runtime_delay(path: Path, *, minimum: float, maximum: float, timeout: f
     path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
 
 
+def _write_scheduler_state(path: Path, run_id: str, state: str) -> None:
+    scheduler_root = path / "runs" / run_id / "provenance" / "scheduler"
+    scheduler_root.mkdir(parents=True, exist_ok=True)
+    (scheduler_root / "job-state.json").write_text(
+        json.dumps(
+            {
+                "run_id": run_id,
+                "scheduler": "mock_lsf",
+                "job_id": f"mock-{run_id}",
+                "state": state,
+                "exit_code": 0 if state == "DONE" else 1,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (scheduler_root / "accounting.yaml").write_text(
+        yaml.safe_dump({"run_id": run_id, "scheduler": "mock_lsf", "state": state}),
+        encoding="utf-8",
+    )
+
+
 def _prepare_scheduler_payload(
     *, config_path: Path, run_id: str, workspace_root: Path, controlled_repo: Path
 ) -> None:
@@ -615,6 +636,7 @@ def test_required_extraction_writes_derived_csv_outside_sim_run_root_and_stage_e
         workspace_root=tmp_path,
         controlled_source_repo=controlled_repo,
     )
+    _write_scheduler_state(tmp_path, "demo_008", "DONE")
 
     result = run_required_extraction(
         config_path=config_path,
@@ -664,6 +686,7 @@ def test_cli_extract_required_writes_stage_json(tmp_path: Path) -> None:
         "dirC,ex1.dat,13,7fee469deaea\n",
         encoding="utf-8",
     )
+    _write_scheduler_state(tmp_path, "demo_009", "DONE")
 
     assert (
         main(
@@ -695,6 +718,61 @@ def test_cli_extract_required_writes_stage_json(tmp_path: Path) -> None:
     assert (tmp_path / "runs/demo_009/provenance/products/extracted/required.csv").is_file()
 
 
+def test_required_extraction_requires_terminal_scheduler_done_not_raw_output_only(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "run.synthetic.yaml"
+    controlled_repo = _create_controlled_source_repo(tmp_path / "controlled-source-demo")
+    _write_config(config_path)
+    prepare_workspace(config_path=config_path, run_id="demo_009a", workspace_root=tmp_path)
+    raw_output = tmp_path / "runs/demo_009a/sim-run-root/lists/dirC/sim-out.dat"
+    raw_output.parent.mkdir(parents=True)
+    raw_output.write_text(
+        "logical_group,example,bytes,sha256_prefix\ndirC,ex1.dat,13,7fee469deaea\n",
+        encoding="utf-8",
+    )
+
+    try:
+        run_required_extraction(
+            config_path=config_path,
+            run_id="demo_009a",
+            workspace_root=tmp_path,
+            controlled_source_repo=controlled_repo,
+        )
+    except ValueError as error:
+        assert "requires terminal scheduler DONE" in str(error)
+        assert "scheduler state evidence is missing" in str(error)
+    else:  # pragma: no cover - assertion guard
+        raise AssertionError("extraction should require terminal scheduler DONE")
+
+
+def test_required_extraction_rejects_failed_scheduler_terminal_state(tmp_path: Path) -> None:
+    config_path = tmp_path / "run.synthetic.yaml"
+    controlled_repo = _create_controlled_source_repo(tmp_path / "controlled-source-demo")
+    _write_config(config_path)
+    prepare_workspace(config_path=config_path, run_id="demo_009b", workspace_root=tmp_path)
+    raw_output = tmp_path / "runs/demo_009b/sim-run-root/lists/dirC/sim-out.dat"
+    raw_output.parent.mkdir(parents=True)
+    raw_output.write_text(
+        "logical_group,example,bytes,sha256_prefix\ndirC,ex1.dat,13,7fee469deaea\n",
+        encoding="utf-8",
+    )
+    _write_scheduler_state(tmp_path, "demo_009b", "EXIT")
+
+    try:
+        run_required_extraction(
+            config_path=config_path,
+            run_id="demo_009b",
+            workspace_root=tmp_path,
+            controlled_source_repo=controlled_repo,
+        )
+    except ValueError as error:
+        assert "requires terminal scheduler DONE" in str(error)
+        assert "'EXIT'" in str(error)
+    else:  # pragma: no cover - assertion guard
+        raise AssertionError("extraction should reject non-DONE scheduler terminal state")
+
+
 def test_ad_hoc_extraction_writes_derived_csv_outside_sim_run_root_and_stage_evidence(
     tmp_path: Path,
 ) -> None:
@@ -711,6 +789,7 @@ def test_ad_hoc_extraction_writes_derived_csv_outside_sim_run_root_and_stage_evi
         "dirC,ex2.dat,17,ignoredbbbbb\n",
         encoding="utf-8",
     )
+    _write_scheduler_state(tmp_path, "demo_010", "DONE")
 
     result = run_ad_hoc_extraction(
         config_path=config_path,
@@ -754,6 +833,7 @@ def test_cli_extract_ad_hoc_writes_stage_json(tmp_path: Path) -> None:
         "dirC,ex1.dat,23,ignoredbbbbb\n",
         encoding="utf-8",
     )
+    _write_scheduler_state(tmp_path, "demo_011", "DONE")
 
     assert (
         main(

@@ -5,6 +5,8 @@ from typing import Any
 
 import yaml
 
+from provenance.stages import configured_harness_make_targets
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -30,7 +32,7 @@ def test_group_vars_define_documented_defaults_and_stage_order() -> None:
     assert group_vars["default_run_id"] == run_config["run"]["default_run_id"]
     assert group_vars["default_controlled_source_repo"] == "../controlled-source-demo"
     assert group_vars["default_controlled_source_ref"] == "controlled-source-demo-v0.1.1"
-    assert group_vars["workflow_stage_targets"] == [
+    assert list(configured_harness_make_targets(ROOT / "configs/run.synthetic.yaml")) == [
         "preflight",
         "prepare-workspace",
         "materialize-inputs",
@@ -67,6 +69,9 @@ def test_playbook_uses_documented_extra_vars_and_make_contract() -> None:
     assert "workflow_controlled_source_repo" in rendered_playbook
     assert "CONTROLLED_SOURCE_REF=" in rendered_playbook
     assert "workflow_controlled_source_ref" in rendered_playbook
+    assert "list-run-stage-targets" in rendered_playbook
+    assert "from_json" in rendered_playbook
+    assert "loop" in rendered_playbook
 
 
 def test_ansible_paths_are_wrapper_controlled_paths() -> None:

@@ -286,6 +286,8 @@ stages:
     expected_controlled_scripts:
       - extract_required
     inputs:
+      - provenance/scheduler/job-state.json
+      - provenance/scheduler/accounting.yaml
       - sim-run-root/lists/dirC/sim-out.dat
     outputs:
       - provenance/products/extracted/required.csv
@@ -301,6 +303,8 @@ stages:
     expected_controlled_scripts:
       - ad_hoc_extract
     inputs:
+      - provenance/scheduler/job-state.json
+      - provenance/scheduler/accounting.yaml
       - sim-run-root/lists/dirC/sim-out.dat
     outputs:
       - provenance/products/extracted/ad_hoc.csv
@@ -323,7 +327,7 @@ stages:
   - name: validate
     display_name: Validate products
     lifecycle_class: factory
-    display_order: 110
+    display_order: 120
     operator_visible: true
     command: make validate
     working_directory: wrapper_repo
@@ -337,7 +341,7 @@ stages:
   - name: inventory_post
     display_name: Inventory output evidence
     lifecycle_class: finalization
-    display_order: 120
+    display_order: 130
     operator_visible: false
     command: make inventory-post
     working_directory: wrapper_repo
@@ -356,7 +360,7 @@ stages:
   - name: manifest
     display_name: Assemble manifest
     lifecycle_class: finalization
-    display_order: 130
+    display_order: 140
     operator_visible: false
     command: make manifest
     working_directory: wrapper_repo
@@ -375,7 +379,7 @@ stages:
   - name: manifest_smoke
     display_name: Verify manifest
     lifecycle_class: finalization
-    display_order: 140
+    display_order: 150
     operator_visible: false
     command: make manifest-smoke
     working_directory: wrapper_repo

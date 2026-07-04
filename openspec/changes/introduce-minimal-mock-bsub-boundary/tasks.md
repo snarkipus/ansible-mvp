@@ -18,13 +18,13 @@
 
 ## 3. Orchestration and Stage Evidence
 
-- [ ] 3.1 Update Make targets to use `submit-mock-lsf`, `wait-mock-lsf`, and `collect-mock-lsf` before extraction.
-- [ ] 3.2 Add Python/config-derived stage target listing or validation so `configs/run.synthetic.yaml` remains the source of truth for run stage order.
-- [ ] 3.3 Update the Ansible playbook to invoke one configured Make target per task in configured order, preserving fail-fast behavior and readable harness-level failure boundaries.
-- [ ] 3.4 Ensure Ansible does not implement scheduler polling or evidence decisions; those remain behind Python CLI commands invoked through Make.
-- [ ] 3.5 Update `configs/run.synthetic.yaml` stage declarations, display order, lifecycle metadata, operator visibility, inputs, and outputs for the scheduler boundary.
-- [ ] 3.6 Preserve payload execution evidence such as `run_simulation.stage.json` while removing direct payload execution from the concise operator-facing flow.
-- [ ] 3.7 Gate extraction on terminal scheduler `DONE` rather than only raw-output presence.
+- [x] 3.1 Update Make targets to use `submit-mock-lsf`, `wait-mock-lsf`, and `collect-mock-lsf` before extraction.
+- [x] 3.2 Add Python/config-derived stage target listing or validation so `configs/run.synthetic.yaml` remains the source of truth for run stage order.
+- [x] 3.3 Update the Ansible playbook to invoke one configured Make target per task in configured order, preserving fail-fast behavior and readable harness-level failure boundaries.
+- [x] 3.4 Ensure Ansible does not implement scheduler polling or evidence decisions; those remain behind Python CLI commands invoked through Make.
+- [x] 3.5 Update `configs/run.synthetic.yaml` stage declarations, display order, lifecycle metadata, operator visibility, inputs, and outputs for the scheduler boundary.
+- [x] 3.6 Preserve payload execution evidence such as `run_simulation.stage.json` while removing direct payload execution from the concise operator-facing flow.
+- [x] 3.7 Gate extraction on terminal scheduler `DONE` rather than only raw-output presence.
 
 ## 4. Manifest, Docs, and Operator Flow
 

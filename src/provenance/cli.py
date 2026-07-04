@@ -40,6 +40,7 @@ from provenance.scheduler import (
     wait_mock_lsf_job,
 )
 from provenance.stages import (
+    configured_harness_make_targets,
     run_ad_hoc_extraction,
     run_required_extraction,
     run_synthetic_simulation,
@@ -114,6 +115,14 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     _add_materialization_arguments(materialize_procs)
     materialize_procs.set_defaults(func=_cmd_materialize_procs)
+
+    stage_targets = subparsers.add_parser(
+        "list-run-stage-targets",
+        help="list configured Make targets for the Ansible run harness",
+    )
+    stage_targets.add_argument("--config", type=Path, default=Path("configs/run.synthetic.yaml"))
+    stage_targets.add_argument("--format", choices=("json", "lines"), default="json")
+    stage_targets.set_defaults(func=_cmd_list_run_stage_targets)
 
     mock_lsf = subparsers.add_parser("submit-mock-lsf", help="submit local async mock LSF job")
     mock_lsf.add_argument("--config", type=Path, default=Path("configs/run.synthetic.yaml"))
@@ -402,6 +411,16 @@ def _cmd_materialize_procs(args: argparse.Namespace) -> int:
         finished_at=finished_at,
         controlled_source_repo=args.controlled_source_repo,
     )
+    return 0
+
+
+def _cmd_list_run_stage_targets(args: argparse.Namespace) -> int:
+    targets = configured_harness_make_targets(args.config)
+    if args.format == "lines":
+        for target in targets:
+            print(target)
+    else:
+        _write_json(list(targets), None)
     return 0
 
 

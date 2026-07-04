@@ -6,6 +6,7 @@ from typing import Any
 import yaml
 
 from provenance.config import read_config_mapping
+from provenance.stages import configured_harness_make_targets
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -183,3 +184,26 @@ def test_run_config_stages_declare_lifecycle_metadata() -> None:
         display_orders.append(stage["display_order"])
 
     assert display_orders == sorted(display_orders)
+
+
+def test_config_derived_harness_targets_follow_stage_order_without_payload_direct_run() -> None:
+    targets = list(configured_harness_make_targets(ROOT / "configs/run.synthetic.yaml"))
+
+    assert targets == [
+        "preflight",
+        "prepare-workspace",
+        "materialize-inputs",
+        "materialize-procs",
+        "inventory-pre",
+        "submit-mock-lsf",
+        "wait-mock-lsf",
+        "collect-mock-lsf",
+        "extract-required",
+        "extract-ad-hoc",
+        "build-reports",
+        "validate",
+        "inventory-post",
+        "manifest",
+        "manifest-smoke",
+    ]
+    assert "run-simulation" not in targets

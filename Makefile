@@ -12,7 +12,7 @@ RUN_ROOT := runs/$(RUN_ID)
 PROVENANCE_ROOT := $(RUN_ROOT)/provenance
 
 .PHONY: help \
-	bootstrap-controlled-source preflight prepare-workspace \
+	bootstrap-controlled-source workflow-stage-targets preflight prepare-workspace \
 	materialize-inputs materialize-procs submit-mock-lsf wait-mock-lsf collect-mock-lsf run-simulation \
 	extract-required extract-ad-hoc build-reports inventory-pre inventory-post \
 	validate manifest manifest-smoke format lint typecheck test check clean
@@ -25,6 +25,11 @@ bootstrap-controlled-source: ## Bootstrap or verify the sibling controlled sourc
 	./scripts/bootstrap_controlled_source.sh "$(CONTROLLED_SOURCE_REPO)"
 
 # Admission: fail fast before the run can start.
+workflow-stage-targets: ## List configured workflow Make targets in run order.
+	uv run provenance list-run-stage-targets \
+		--config configs/run.synthetic.yaml \
+		--format lines
+
 preflight: ## Run the Git-controlled source entrance gate before workflow stages.
 	uv run provenance preflight \
 		--config configs/run.synthetic.yaml \

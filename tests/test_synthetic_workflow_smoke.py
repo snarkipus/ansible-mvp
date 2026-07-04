@@ -87,6 +87,8 @@ def test_clean_synthetic_workflow_smoke_generates_manifest_reports_and_validatio
         "materialize_inputs",
         "materialize_procs",
         "submit_mock_lsf",
+        "wait_mock_lsf",
+        "collect_mock_lsf",
         "inventory_pre",
         "inventory_post",
         "validate",

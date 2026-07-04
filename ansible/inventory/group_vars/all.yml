@@ -7,20 +7,3 @@ provenance_wrapper_repo: "{{ playbook_dir }}/../.."
 run_config_path: configs/run.synthetic.yaml
 shape_config_path: configs/expected_shape.required_extract.yaml
 make_executable: make
-
-workflow_stage_targets:
-  - preflight
-  - prepare-workspace
-  - materialize-inputs
-  - materialize-procs
-  - inventory-pre
-  - submit-mock-lsf
-  - wait-mock-lsf
-  - collect-mock-lsf
-  - extract-required
-  - extract-ad-hoc
-  - build-reports
-  - validate
-  - inventory-post
-  - manifest
-  - manifest-smoke

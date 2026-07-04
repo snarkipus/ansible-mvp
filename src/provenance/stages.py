@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import shlex
 import subprocess
@@ -334,6 +335,27 @@ def run_ad_hoc_extraction(
     )
 
 
+def configured_harness_make_targets(config_path: Path | str) -> tuple[str, ...]:
+    """Return the ordered Make targets that should be sequenced by Ansible.
+
+    ``configs/run.synthetic.yaml`` is the source of truth for stage order.  The
+    scheduler-owned payload stage remains configured and evidenced, but it is
+    intentionally not an Ansible/Make harness target because it executes behind
+    ``submit-mock-lsf``.
+    """
+
+    config = _read_yaml_mapping(Path(config_path))
+    scheduler = _mapping(config.get("scheduler"), "scheduler")
+    payload_stage = _non_empty_string(scheduler.get("payload_stage"), "scheduler.payload_stage")
+    targets: list[str] = []
+    for stage in _ordered_config_stages(config):
+        stage_name = _non_empty_string(stage.get("name"), "stages[].name")
+        if stage_name == payload_stage:
+            continue
+        targets.append(_harness_make_target(stage))
+    return tuple(targets)
+
+
 def _run_configured_stage(
     *,
     config_path: Path,
@@ -351,6 +373,7 @@ def _run_configured_stage(
     layout = _mapping(config.get("layout"), "layout")
     stage = _stage_by_name(config, stage_name)
     run_root = root / _format_layout_path(layout, "run_root", run_id)
+    _require_scheduler_done_for_extraction(config, root, run_root, stage_name)
     sim_run_root = root / _format_layout_path(layout, "sim_run_root", run_id)
     provenance_root = root / _format_layout_path(layout, "provenance_root", run_id)
     log_root = provenance_root / "logs"
@@ -416,6 +439,58 @@ def _run_configured_stage(
         inputs=inputs,
         outputs=outputs,
     )
+
+
+def _ordered_config_stages(config: dict[str, Any]) -> tuple[dict[str, Any], ...]:
+    return tuple(
+        sorted(
+            (_mapping(stage, "stages[]") for stage in _list(config.get("stages"), "stages")),
+            key=lambda stage: _stage_display_order(stage),
+        )
+    )
+
+
+def _harness_make_target(stage: dict[str, Any]) -> str:
+    command_kind = stage.get("command_kind")
+    command = _non_empty_string(stage.get("command"), "stages[].command")
+    if command_kind == "wrapper_make_target":
+        argv = shlex.split(command)
+        if len(argv) == 2 and argv[0] == "make":
+            return argv[1]
+        raise ValueError(f"wrapper Make stage command must be 'make <target>': {command}")
+    stage_name = _non_empty_string(stage.get("name"), "stages[].name")
+    return stage_name.replace("_", "-")
+
+
+def _require_scheduler_done_for_extraction(
+    config: dict[str, Any], root: Path, run_root: Path, stage_name: str
+) -> None:
+    if stage_name not in {"extract_required", "extract_ad_hoc"}:
+        return
+    scheduler = _mapping(config.get("scheduler"), "scheduler")
+    state_path = run_root / "provenance" / "scheduler" / "job-state.json"
+    if not state_path.is_file():
+        raise ValueError(
+            f"{stage_name} requires terminal scheduler DONE before extraction; "
+            f"scheduler state evidence is missing: {_display_path(root, state_path)}"
+        )
+    loaded = json.loads(state_path.read_text(encoding="utf-8"))
+    if not isinstance(loaded, dict):
+        raise ValueError(
+            f"scheduler state evidence must be a mapping: {_display_path(root, state_path)}"
+        )
+    if loaded.get("state") != "DONE":
+        raise ValueError(
+            f"{stage_name} requires terminal scheduler DONE before extraction; "
+            f"observed scheduler state {loaded.get('state')!r} in {_display_path(root, state_path)}"
+        )
+    payload_stage = _non_empty_string(scheduler.get("payload_stage"), "scheduler.payload_stage")
+    if payload_stage != "run_simulation":
+        raise ValueError("scheduler.payload_stage must be run_simulation for extraction gating")
+
+
+def _display_path(root: Path, path: Path) -> str:
+    return path.relative_to(root).as_posix() if path.is_relative_to(root) else path.as_posix()
 
 
 def _utc_now() -> datetime:
