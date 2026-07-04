@@ -173,6 +173,7 @@ def test_cli_validate_required_writes_configured_validation_evidence(
     shape_config.write_text(
         yaml.safe_dump(
             {
+                "schema_version": "0.1",
                 "product": {
                     "relative_path": "provenance/products/extracted/required.csv",
                     "display_path": "products/extracted/required.csv",

@@ -7,8 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import yaml
-
+from provenance.config import read_config_mapping
 from provenance.git_state import capture_repository_state, resolve_ref
 from provenance.hashing import hash_artifact
 
@@ -326,9 +325,7 @@ def _copy_controlled_file(
 
 
 def _read_yaml_mapping(path: Path) -> dict[str, Any]:
-    with path.open(encoding="utf-8") as file_obj:
-        loaded = yaml.safe_load(file_obj) or {}
-    return _mapping(loaded, path.as_posix())
+    return read_config_mapping(path)
 
 
 def _mapping(value: object, name: str) -> dict[str, Any]:

@@ -15,6 +15,7 @@ from typing import Any, Mapping, Protocol, Sequence, cast
 
 import yaml
 
+from provenance.config import read_config_mapping, read_yaml_mapping
 from provenance.git_state import capture_repository_state, resolve_ref, script_identity
 from provenance.hashing import HashPolicy, hash_artifact
 
@@ -171,7 +172,7 @@ def assemble_run_manifest(
 
     root = Path(workspace_root).expanduser().resolve()
     config_file = Path(config_path)
-    config = _read_yaml_mapping(config_file)
+    config = read_config_mapping(config_file)
     layout_config = _required_mapping(config, "layout")
     repositories_config = _required_mapping(config, "repositories")
     controlled_scripts_config = _required_mapping(config, "controlled_scripts")
@@ -441,11 +442,7 @@ def _format_layout_path(layout: Mapping[str, object], key: str, run_id: str) -> 
 
 
 def _read_yaml_mapping(path: Path) -> dict[str, Any]:
-    with path.open(encoding="utf-8") as file_obj:
-        loaded = yaml.safe_load(file_obj) or {}
-    if not isinstance(loaded, dict):
-        raise ValueError(f"YAML input must be a mapping: {path}")
-    return loaded
+    return read_yaml_mapping(path)
 
 
 def _required_mapping(source: Mapping[str, object], key: str) -> dict[str, Any]:

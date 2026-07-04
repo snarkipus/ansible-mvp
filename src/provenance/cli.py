@@ -14,8 +14,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, NoReturn, Sequence
 
-import yaml
-
+from provenance.config import read_config_mapping, read_yaml_mapping
 from provenance.git_state import (
     GitStateError,
     capture_repository_state,
@@ -689,7 +688,7 @@ def _cmd_validate_csv(args: argparse.Namespace) -> int:
 
 def _cmd_validate_required(args: argparse.Namespace) -> int:
     started_at = _utc_now()
-    shape = _read_yaml_mapping(args.shape_config)
+    shape = read_config_mapping(args.shape_config)
     run_root = args.workspace_root.expanduser().resolve() / "runs" / args.run_id
     product = _required_mapping(shape, "product")
     expectations = _required_mapping(shape, "expectations")
@@ -845,11 +844,7 @@ def _script_payload(repo: Path, relative_path: str) -> dict[str, Any]:
 
 
 def _read_yaml_mapping(path: Path) -> dict[str, Any]:
-    with path.open(encoding="utf-8") as file_obj:
-        loaded = yaml.safe_load(file_obj) or {}
-    if not isinstance(loaded, dict):
-        raise ValueError(f"YAML input must be a mapping: {path}")
-    return loaded
+    return read_yaml_mapping(path)
 
 
 def _required_mapping(source: dict[str, Any], key: str) -> dict[str, Any]:

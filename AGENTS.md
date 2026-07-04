@@ -1,8 +1,8 @@
 # AGENTS.md
 
 ## Current State
-- This repo currently contains concept/planning material, not the runnable MVP scaffold described in `README.md` and `docs/provenance_first_mvp_concept_spec.md`.
-- Do not assume `Makefile`, `ansible/`, `src/provenance/`, `tests/`, `requirements.txt`, or `controlled-source-demo` exist until you create or verify them.
+- This repo contains the implemented local synthetic provenance MVP scaffold described in `README.md` and `docs/how_to_use_this_mvp.md`.
+- The scaffold includes `Makefile`, `ansible/`, `configs/`, `src/provenance/`, `tests/`, controlled-source templates under `templates/`, and bootstrap support for sibling `../controlled-source-demo`.
 - Root `openspec/` exists; active changes under `openspec/changes/` are planning artifacts and must be checked before implementation.
 
 ## Intended MVP Shape
@@ -23,8 +23,8 @@
 - Mock LSF only for the MVP; do not require `bsub`, `bjobs`, `bhist`, `bacct`, or a real scheduler.
 
 ## Commands
-- Planned bootstrap command from docs: `make bootstrap-controlled-source` creates/tags `../controlled-source-demo` as `controlled-source-demo-v0.1.0` once the Makefile exists.
-- Planned run command from docs:
+- Implemented bootstrap command: `make bootstrap-controlled-source` creates or verifies sibling `../controlled-source-demo` with tag `controlled-source-demo-v0.1.0`.
+- Implemented local run command:
   ```bash
   ansible-playbook ansible/playbooks/run_synthetic_workflow.yml \
     -i ansible/inventory/localhost.ini \
@@ -32,7 +32,7 @@
     -e controlled_source_repo=../controlled-source-demo \
     -e controlled_source_ref=controlled-source-demo-v0.1.0
   ```
-- These commands are currently design targets, not verified executable commands, until the scaffold is implemented.
+- `make check` is the primary code quality gate. Maintainer workflow changes should also run strict OpenSpec validation and `bd lint --json`.
 
 ## OpenCode/OpenSpec
 - Repo-local OpenCode commands exist under `.opencode/commands/`: `/opsx-propose`, `/opsx-apply`, `/opsx-explore`, and `/opsx-archive`.

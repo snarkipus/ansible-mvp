@@ -4,6 +4,8 @@ from pathlib import Path
 
 import yaml
 
+from provenance.config import read_config_mapping
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -77,6 +79,24 @@ def test_run_config_links_layout_hash_policy_and_validation_expectations() -> No
         "minimum_data_rows": 1,
         "non_empty": True,
     }
+
+
+def test_config_loader_accepts_supported_schema_version() -> None:
+    config = read_config_mapping(ROOT / "configs/run.synthetic.yaml")
+
+    assert config["schema_version"] == "0.1"
+
+
+def test_config_loader_rejects_unsupported_schema_version(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text('schema_version: "9.9"\n', encoding="utf-8")
+
+    try:
+        read_config_mapping(config_path)
+    except ValueError as error:
+        assert "schema_version must be '0.1'" in str(error)
+    else:  # pragma: no cover - assertion guard
+        raise AssertionError("unsupported schema_version should fail")
 
 
 def test_run_config_stages_declare_lifecycle_metadata() -> None:

@@ -20,6 +20,7 @@ def _write_config(path: Path) -> None:
     path.write_text(
         yaml.safe_dump(
             {
+                "schema_version": "0.1",
                 "layout": {
                     "run_root": "runs/{run_id}",
                     "sim_run_root": "runs/{run_id}/sim-run-root",

@@ -10,8 +10,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-import yaml
-
+from provenance.config import read_config_mapping
 from provenance.hashing import hash_artifact
 from provenance.inventory import infer_metadata
 
@@ -572,9 +571,7 @@ def _format_layout_path(layout: dict[str, Any], key: str, run_id: str) -> Path:
 
 
 def _read_yaml_mapping(path: Path) -> dict[str, Any]:
-    with path.open(encoding="utf-8") as file_obj:
-        loaded = yaml.safe_load(file_obj) or {}
-    return _mapping(loaded, path.as_posix())
+    return read_config_mapping(path)
 
 
 def _mapping(value: object, name: str) -> dict[str, Any]:
