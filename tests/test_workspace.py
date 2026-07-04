@@ -9,6 +9,7 @@ import yaml
 from provenance.cli import main
 from provenance.scheduler import write_mock_lsf_metadata
 from provenance.stages import (
+    _stage_command_argv,
     run_ad_hoc_extraction,
     run_required_extraction,
     run_synthetic_simulation,
@@ -65,6 +66,7 @@ def _write_config(path: Path) -> None:
                         "display_order": 60,
                         "operator_visible": True,
                         "command": "procs/run-script.sh",
+                        "command_kind": "materialized_controlled_script",
                         "working_directory": "sim-run-root",
                         "inputs": ["sim-run-root/input"],
                         "outputs": ["sim-run-root/lists/dirC/sim-out.dat"],
@@ -134,6 +136,46 @@ def test_prepare_workspace_creates_separated_simulation_and_provenance_dirs(
 
     assert not (sim_root / "provenance").exists()
     assert result.to_dict()["provenance_root"] == "runs/demo_001/provenance"
+
+
+def test_stage_command_argv_resolves_only_controlled_source_script_executables(
+    tmp_path: Path,
+) -> None:
+    controlled_root = tmp_path / "controlled-source-demo"
+    controlled_script = controlled_root / "scripts" / "extract_required.pl"
+    controlled_script.parent.mkdir(parents=True)
+    controlled_script.write_text("#!/usr/bin/env perl\n", encoding="utf-8")
+
+    argv = _stage_command_argv(
+        "scripts/extract_required.pl sim-run-root/lists/dirC/sim-out.dat provenance/out.csv",
+        {"command_kind": "controlled_source_script"},
+        controlled_root,
+        tmp_path / "runs" / "demo_001",
+        controlled_root,
+    )
+
+    assert argv[0] == controlled_script.as_posix()
+    assert argv[1] == (tmp_path / "runs/demo_001/sim-run-root/lists/dirC/sim-out.dat").as_posix()
+    assert argv[2] == (tmp_path / "runs/demo_001/provenance/out.csv").as_posix()
+
+
+def test_stage_command_argv_does_not_fallback_to_controlled_root_for_materialized_stage(
+    tmp_path: Path,
+) -> None:
+    controlled_root = tmp_path / "controlled-source-demo"
+    controlled_script = controlled_root / "procs" / "run-script.sh"
+    controlled_script.parent.mkdir(parents=True)
+    controlled_script.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+
+    argv = _stage_command_argv(
+        "procs/run-script.sh",
+        {"command_kind": "materialized_controlled_script"},
+        tmp_path / "runs" / "demo_001" / "sim-run-root",
+        tmp_path / "runs" / "demo_001",
+        controlled_root,
+    )
+
+    assert argv == ["procs/run-script.sh"]
 
 
 def test_cli_prepare_workspace_writes_json_evidence(tmp_path: Path) -> None:

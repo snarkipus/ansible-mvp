@@ -525,12 +525,11 @@ def _stage_command_argv(
     argv = shlex.split(command)
     if not argv:
         raise ValueError("stage command must not be empty")
-    if stage.get("command_kind") == "controlled_source_script":
+    command_kind = stage.get("command_kind")
+    if command_kind == "controlled_source_script":
         argv[0] = (controlled_root / argv[0]).as_posix()
-    elif not Path(argv[0]).is_absolute() and not (working_directory / argv[0]).exists():
-        candidate = controlled_root / argv[0]
-        if candidate.exists():
-            argv[0] = candidate.as_posix()
+    elif command_kind != "materialized_controlled_script":
+        raise ValueError(f"unsupported executable stage command_kind: {command_kind}")
     return [_resolve_run_argument(argument, run_root) for argument in argv]
 
 
