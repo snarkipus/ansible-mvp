@@ -34,15 +34,14 @@
         fail_msg: "Expected Makefile at {{ provenance_wrapper_repo }}/Makefile"
 
   tasks:
-    - name: Run workflow stage through the Make contract
+    - name: Run workflow stages through the Make contract
       ansible.builtin.command:
-        argv:
-          - "{{ make_executable }}"
-          - "{{ item }}"
-          - "RUN_ID={{ workflow_run_id }}"
-          - "CONTROLLED_SOURCE_REPO={{ workflow_controlled_source_repo }}"
-          - "CONTROLLED_SOURCE_REF={{ workflow_controlled_source_ref }}"
+        argv: >-
+          {{ [make_executable]
+             + workflow_stage_targets
+             + ['RUN_ID=' ~ workflow_run_id,
+                'CONTROLLED_SOURCE_REPO=' ~ workflow_controlled_source_repo,
+                'CONTROLLED_SOURCE_REF=' ~ workflow_controlled_source_ref] }}
       args:
         chdir: "{{ provenance_wrapper_repo }}"
-      loop: "{{ workflow_stage_targets }}"
       changed_when: true

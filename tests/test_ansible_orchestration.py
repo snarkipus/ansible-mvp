@@ -59,9 +59,12 @@ def test_playbook_uses_documented_extra_vars_and_make_contract() -> None:
     assert "run_id | default(default_run_id)" in rendered_playbook
     assert "controlled_source_repo | default(default_controlled_source_repo)" in rendered_playbook
     assert "controlled_source_ref | default(default_controlled_source_ref)" in rendered_playbook
-    assert "RUN_ID={{ workflow_run_id }}" in rendered_playbook
-    assert "CONTROLLED_SOURCE_REPO={{ workflow_controlled_source_repo }}" in rendered_playbook
-    assert "CONTROLLED_SOURCE_REF={{ workflow_controlled_source_ref }}" in rendered_playbook
+    assert "RUN_ID=" in rendered_playbook
+    assert "workflow_run_id" in rendered_playbook
+    assert "CONTROLLED_SOURCE_REPO=" in rendered_playbook
+    assert "workflow_controlled_source_repo" in rendered_playbook
+    assert "CONTROLLED_SOURCE_REF=" in rendered_playbook
+    assert "workflow_controlled_source_ref" in rendered_playbook
 
 
 def test_ansible_paths_are_wrapper_controlled_paths() -> None:
