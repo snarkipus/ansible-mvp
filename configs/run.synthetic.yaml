@@ -231,10 +231,10 @@ stages:
     outputs:
       - provenance/scheduler/submission.yaml
   - name: run_simulation
-    display_name: Run simulation
+    display_name: Run simulation payload
     lifecycle_class: factory
-    display_order: 70
-    operator_visible: true
+    display_order: 65
+    operator_visible: false
     command: procs/run-script.sh
     working_directory: sim-run-root
     command_kind: materialized_controlled_script
@@ -246,10 +246,38 @@ stages:
       - sim-run-root/input
     outputs:
       - sim-run-root/lists/dirC/sim-out.dat
+  - name: wait_mock_lsf
+    display_name: Wait for simulation
+    lifecycle_class: factory
+    display_order: 70
+    operator_visible: true
+    command: make wait-mock-lsf
+    working_directory: wrapper_repo
+    command_kind: wrapper_make_target
+    approved_command_path: Makefile
+    inputs:
+      - provenance/scheduler/submission.yaml
+      - provenance/scheduler/job-state.json
+    outputs:
+      - provenance/scheduler/job-state.json
+      - sim-run-root/lists/dirC/sim-out.dat
+  - name: collect_mock_lsf
+    display_name: Collect scheduler evidence
+    lifecycle_class: evidence
+    display_order: 80
+    operator_visible: true
+    command: make collect-mock-lsf
+    working_directory: wrapper_repo
+    command_kind: wrapper_make_target
+    approved_command_path: Makefile
+    inputs:
+      - provenance/scheduler/job-state.json
+    outputs:
+      - provenance/scheduler/accounting.yaml
   - name: extract_required
     display_name: Extract required results
     lifecycle_class: factory
-    display_order: 80
+    display_order: 90
     operator_visible: true
     command: scripts/extract_required.pl sim-run-root/lists/dirC/sim-out.dat provenance/products/extracted/required.csv
     working_directory: controlled_source_repo
@@ -264,7 +292,7 @@ stages:
   - name: extract_ad_hoc
     display_name: Extract ad hoc results
     lifecycle_class: factory
-    display_order: 90
+    display_order: 100
     operator_visible: true
     command: scripts/ad_hoc_extract.py sim-run-root/lists/dirC/sim-out.dat provenance/products/extracted/ad_hoc.csv
     working_directory: controlled_source_repo
@@ -279,7 +307,7 @@ stages:
   - name: build_reports
     display_name: Build report products
     lifecycle_class: factory
-    display_order: 100
+    display_order: 110
     operator_visible: true
     command: make build-reports
     working_directory: wrapper_repo

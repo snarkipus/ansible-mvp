@@ -7,14 +7,19 @@ from pathlib import Path
 import yaml
 
 from provenance.cli import main
-from provenance.scheduler import write_mock_lsf_metadata
+from provenance.scheduler import (
+    collect_mock_lsf_accounting,
+    submit_mock_lsf_job,
+    wait_mock_lsf_job,
+    write_mock_lsf_metadata,
+)
 from provenance.stages import (
     _stage_command_argv,
     run_ad_hoc_extraction,
     run_required_extraction,
     run_synthetic_simulation,
 )
-from provenance.workspace import materialize_inputs, prepare_workspace
+from provenance.workspace import materialize_inputs, materialize_runtime_scripts, prepare_workspace
 
 
 def _write_config(path: Path) -> None:
@@ -122,6 +127,41 @@ def _write_config(path: Path) -> None:
             }
         ),
         encoding="utf-8",
+    )
+
+
+def _set_runtime_delay(path: Path, *, minimum: float, maximum: float, timeout: float = 1.0) -> None:
+    config = yaml.safe_load(path.read_text(encoding="utf-8"))
+    assert isinstance(config, dict)
+    scheduler = config["scheduler"]
+    assert isinstance(scheduler, dict)
+    scheduler["runtime_delay"] = {
+        "min_seconds": minimum,
+        "max_seconds": maximum,
+        "jitter": "deterministic_run_id",
+    }
+    scheduler["poll_interval_seconds"] = 0.05
+    scheduler["wait_timeout_seconds"] = timeout
+    path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+
+
+def _prepare_scheduler_payload(
+    *, config_path: Path, run_id: str, workspace_root: Path, controlled_repo: Path
+) -> None:
+    prepare_workspace(config_path=config_path, run_id=run_id, workspace_root=workspace_root)
+    materialize_inputs(
+        config_path=config_path,
+        run_id=run_id,
+        workspace_root=workspace_root,
+        controlled_source_repo=controlled_repo,
+        controlled_source_ref="controlled-source-demo-v0.1.1",
+    )
+    materialize_runtime_scripts(
+        config_path=config_path,
+        run_id=run_id,
+        workspace_root=workspace_root,
+        controlled_source_repo=controlled_repo,
+        controlled_source_ref="controlled-source-demo-v0.1.1",
     )
 
 
@@ -299,13 +339,29 @@ def test_write_mock_lsf_metadata_records_absent_lsf_tools_without_failing(
     tmp_path: Path,
 ) -> None:
     config_path = tmp_path / "run.synthetic.yaml"
+    controlled_repo = _create_controlled_source_repo(tmp_path / "controlled-source-demo")
     _write_config(config_path)
     prepare_workspace(config_path=config_path, run_id="demo_005", workspace_root=tmp_path)
+    materialize_inputs(
+        config_path=config_path,
+        run_id="demo_005",
+        workspace_root=tmp_path,
+        controlled_source_repo=controlled_repo,
+        controlled_source_ref="controlled-source-demo-v0.1.1",
+    )
+    materialize_runtime_scripts(
+        config_path=config_path,
+        run_id="demo_005",
+        workspace_root=tmp_path,
+        controlled_source_repo=controlled_repo,
+        controlled_source_ref="controlled-source-demo-v0.1.1",
+    )
 
     payload = write_mock_lsf_metadata(
         config_path=config_path,
         run_id="demo_005",
         workspace_root=tmp_path,
+        controlled_source_repo=controlled_repo,
         tool_resolver=lambda _name: None,
     )
 
@@ -323,8 +379,23 @@ def test_write_mock_lsf_metadata_records_absent_lsf_tools_without_failing(
 def test_cli_submit_mock_lsf_writes_scheduler_yaml(tmp_path: Path) -> None:
     config_path = tmp_path / "run.synthetic.yaml"
     output_path = tmp_path / "runs/demo_006/provenance/scheduler/submission.yaml"
+    controlled_repo = _create_controlled_source_repo(tmp_path / "controlled-source-demo")
     _write_config(config_path)
     prepare_workspace(config_path=config_path, run_id="demo_006", workspace_root=tmp_path)
+    materialize_inputs(
+        config_path=config_path,
+        run_id="demo_006",
+        workspace_root=tmp_path,
+        controlled_source_repo=controlled_repo,
+        controlled_source_ref="controlled-source-demo-v0.1.1",
+    )
+    materialize_runtime_scripts(
+        config_path=config_path,
+        run_id="demo_006",
+        workspace_root=tmp_path,
+        controlled_source_repo=controlled_repo,
+        controlled_source_ref="controlled-source-demo-v0.1.1",
+    )
 
     assert (
         main(
@@ -336,6 +407,8 @@ def test_cli_submit_mock_lsf_writes_scheduler_yaml(tmp_path: Path) -> None:
                 "demo_006",
                 "--workspace-root",
                 str(tmp_path),
+                "--controlled-source-repo",
+                str(controlled_repo),
                 "--output",
                 str(output_path),
             ]
@@ -347,6 +420,103 @@ def test_cli_submit_mock_lsf_writes_scheduler_yaml(tmp_path: Path) -> None:
     assert metadata["submission"]["job_id"] == "mock-demo_006"
     assert metadata["submission"]["command"] == "make submit-mock-lsf"
     assert metadata["provenance_root"] == "runs/demo_006/provenance"
+
+
+def test_mock_lsf_submit_wait_and_collect_use_wrapper_terminal_state(tmp_path: Path) -> None:
+    config_path = tmp_path / "run.synthetic.yaml"
+    controlled_repo = _create_controlled_source_repo(tmp_path / "controlled-source-demo")
+    _write_config(config_path)
+    _set_runtime_delay(config_path, minimum=1.0, maximum=1.0, timeout=5.0)
+    _prepare_scheduler_payload(
+        config_path=config_path,
+        run_id="demo_006a",
+        workspace_root=tmp_path,
+        controlled_repo=controlled_repo,
+    )
+
+    submission = submit_mock_lsf_job(
+        config_path=config_path,
+        run_id="demo_006a",
+        workspace_root=tmp_path,
+        controlled_source_repo=controlled_repo,
+    )
+
+    state_path = tmp_path / submission["job_state_path"]
+    initial_state = json.loads(state_path.read_text(encoding="utf-8"))
+    assert initial_state["state"] == "RUN"
+    assert initial_state["exit_code"] is None
+
+    terminal_state = wait_mock_lsf_job(
+        config_path=config_path, run_id="demo_006a", workspace_root=tmp_path
+    )
+    assert terminal_state["state"] == "DONE"
+    assert terminal_state["exit_code"] == 0
+    assert (tmp_path / "runs/demo_006a/provenance/scheduler/terminal-state.json").is_file()
+    assert (tmp_path / "runs/demo_006a/provenance/logs/run_simulation.stage.json").is_file()
+
+    accounting = collect_mock_lsf_accounting(
+        config_path=config_path, run_id="demo_006a", workspace_root=tmp_path
+    )
+    assert accounting["state"] == "DONE"
+    assert accounting["exit_code"] == 0
+    assert accounting["payload_stage_evidence"] == (
+        "runs/demo_006a/provenance/logs/run_simulation.stage.json"
+    )
+
+
+def test_mock_lsf_wait_timeout_records_failed_evidence(tmp_path: Path) -> None:
+    config_path = tmp_path / "run.synthetic.yaml"
+    controlled_repo = _create_controlled_source_repo(tmp_path / "controlled-source-demo")
+    _write_config(config_path)
+    _set_runtime_delay(config_path, minimum=2.0, maximum=2.0, timeout=0.1)
+    _prepare_scheduler_payload(
+        config_path=config_path,
+        run_id="demo_006b",
+        workspace_root=tmp_path,
+        controlled_repo=controlled_repo,
+    )
+    submit_mock_lsf_job(
+        config_path=config_path,
+        run_id="demo_006b",
+        workspace_root=tmp_path,
+        controlled_source_repo=controlled_repo,
+    )
+
+    terminal_state = wait_mock_lsf_job(
+        config_path=config_path, run_id="demo_006b", workspace_root=tmp_path
+    )
+
+    assert terminal_state["state"] == "TIMEOUT"
+    assert terminal_state["status_reason"] == "wait_timeout"
+    assert terminal_state["cleanup"]["attempted"] is True
+
+
+def test_mock_lsf_collect_rejects_non_terminal_job(tmp_path: Path) -> None:
+    config_path = tmp_path / "run.synthetic.yaml"
+    controlled_repo = _create_controlled_source_repo(tmp_path / "controlled-source-demo")
+    _write_config(config_path)
+    _set_runtime_delay(config_path, minimum=1.0, maximum=1.0, timeout=5.0)
+    _prepare_scheduler_payload(
+        config_path=config_path,
+        run_id="demo_006c",
+        workspace_root=tmp_path,
+        controlled_repo=controlled_repo,
+    )
+    submit_mock_lsf_job(
+        config_path=config_path,
+        run_id="demo_006c",
+        workspace_root=tmp_path,
+        controlled_source_repo=controlled_repo,
+    )
+
+    try:
+        collect_mock_lsf_accounting(
+            config_path=config_path, run_id="demo_006c", workspace_root=tmp_path
+        )
+    except ValueError as error:
+        assert "mock LSF job is not terminal" in str(error)
+    else:  # pragma: no cover - assertion guard
+        raise AssertionError("collect should fail before terminal scheduler state")
 
 
 def test_run_synthetic_simulation_writes_raw_output_and_stage_evidence(
@@ -637,6 +807,14 @@ def _create_controlled_source_repo(path: Path) -> Path:
         "output_dir=$run_root/lists/dirC\n"
         'mkdir -p -- "$output_dir"\n'
         "output_file=$output_dir/sim-out.dat\n"
+        "delay_seconds=${SYNTHETIC_SIM_RUNTIME_DELAY_MIN_SECONDS:-0}\n"
+        "if python3 - \"$delay_seconds\" <<'PY'\n"
+        "import sys\n"
+        "raise SystemExit(0 if float(sys.argv[1]) > 0 else 1)\n"
+        "PY\n"
+        "then\n"
+        '  sleep "$delay_seconds"\n'
+        "fi\n"
         "printf 'logical_group,example,bytes,sha256_prefix\\n' >\"$output_file\"\n"
         "for logical_group in dirA dirB dirC; do\n"
         "  for example in ex1.dat ex2.dat ex3.dat; do\n"

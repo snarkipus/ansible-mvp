@@ -231,6 +231,11 @@ def run_synthetic_simulation(
     env = os.environ.copy()
     env["CONTROLLED_SOURCE_REPO"] = controlled_root.as_posix()
     env["SYNTHETIC_SIM_ENGINE"] = (controlled_root / "scripts/synthetic_sim_engine.sh").as_posix()
+    scheduler = _mapping(config.get("scheduler"), "scheduler")
+    runtime_delay = _mapping(scheduler.get("runtime_delay"), "scheduler.runtime_delay")
+    env["SYNTHETIC_SIM_RUN_ID"] = run_id
+    env["SYNTHETIC_SIM_RUNTIME_DELAY_MIN_SECONDS"] = str(runtime_delay["min_seconds"])
+    env["SYNTHETIC_SIM_RUNTIME_DELAY_MAX_SECONDS"] = str(runtime_delay["max_seconds"])
 
     with (
         stdout_log.open("w", encoding="utf-8") as stdout_obj,

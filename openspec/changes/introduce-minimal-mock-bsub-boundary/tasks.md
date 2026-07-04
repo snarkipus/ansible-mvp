@@ -8,13 +8,13 @@
 
 ## 2. Local Async Emulator
 
-- [ ] 2.1 Replace the current single mock scheduler helper with submit, wait, and collect helpers in scheduler code.
-- [ ] 2.2 Implement `submit_mock_lsf` local async behavior using `subprocess.Popen` to launch a scheduler-owned wrapper with submission evidence, PID/process-group state recording, scheduler-owned terminal-state file paths, and stdout/stderr paths.
-- [ ] 2.3 Implement the scheduler-owned wrapper so it executes the payload and writes started/finished timestamps, exit code, and terminal `DONE`/`EXIT` state under `provenance/scheduler/`.
-- [ ] 2.4 Implement `wait_mock_lsf` polling with non-terminal state observation, terminal state file detection, timeout handling, missing PID handling, vanished-process evidence, and stale non-terminal state handling.
-- [ ] 2.5 Implement `collect_mock_lsf` accounting output that requires terminal state and links scheduler state to payload execution evidence.
-- [ ] 2.6 Add deterministic configured runtime-delay support in the controlled synthetic payload path, with fast test overrides and run-id-seeded jitter when a range is configured.
-- [ ] 2.7 Ensure subprocess stdout/stderr are written to files without pipe-drain deadlocks and that timeout cleanup attempts process-group termination before recording timeout/orphan evidence.
+- [x] 2.1 Replace the current single mock scheduler helper with submit, wait, and collect helpers in scheduler code.
+- [x] 2.2 Implement `submit_mock_lsf` local async behavior using `subprocess.Popen` to launch a scheduler-owned wrapper with submission evidence, PID/process-group state recording, scheduler-owned terminal-state file paths, and stdout/stderr paths.
+- [x] 2.3 Implement the scheduler-owned wrapper so it executes the payload and writes started/finished timestamps, exit code, and terminal `DONE`/`EXIT` state under `provenance/scheduler/`.
+- [x] 2.4 Implement `wait_mock_lsf` polling with non-terminal state observation, terminal state file detection, timeout handling, missing PID handling, vanished-process evidence, and stale non-terminal state handling.
+- [x] 2.5 Implement `collect_mock_lsf` accounting output that requires terminal state and links scheduler state to payload execution evidence.
+- [x] 2.6 Add deterministic configured runtime-delay support in the controlled synthetic payload path, with fast test overrides and run-id-seeded jitter when a range is configured.
+- [x] 2.7 Ensure subprocess stdout/stderr are written to files without pipe-drain deadlocks and that timeout cleanup attempts process-group termination before recording timeout/orphan evidence.
 
 ## 3. Orchestration and Stage Evidence
 

@@ -70,16 +70,25 @@ submit-mock-lsf: ## Write mock LSF scheduler metadata without requiring real LSF
 		--config configs/run.synthetic.yaml \
 		--run-id "$(RUN_ID)" \
 		--workspace-root . \
+		--controlled-source-repo "$(CONTROLLED_SOURCE_REPO)" \
 		--output "$(PROVENANCE_ROOT)/scheduler/submission.yaml" \
 		--stage-output "$(PROVENANCE_ROOT)/logs/submit_mock_lsf.stage.json"
 
-wait-mock-lsf: ## Wait for mock LSF terminal state (implemented by async scheduler change).
-	@printf 'wait-mock-lsf is not implemented yet; see ansible-mvp-1s3.4.\n' >&2
-	@exit 2
+wait-mock-lsf: ## Wait for mock LSF terminal state.
+	uv run provenance wait-mock-lsf \
+		--config configs/run.synthetic.yaml \
+		--run-id "$(RUN_ID)" \
+		--workspace-root . \
+		--output "$(PROVENANCE_ROOT)/scheduler/job-state.json" \
+		--stage-output "$(PROVENANCE_ROOT)/logs/wait_mock_lsf.stage.json"
 
-collect-mock-lsf: ## Collect mock LSF accounting evidence (implemented by async scheduler change).
-	@printf 'collect-mock-lsf is not implemented yet; see ansible-mvp-1s3.4.\n' >&2
-	@exit 2
+collect-mock-lsf: ## Collect mock LSF accounting evidence.
+	uv run provenance collect-mock-lsf \
+		--config configs/run.synthetic.yaml \
+		--run-id "$(RUN_ID)" \
+		--workspace-root . \
+		--output "$(PROVENANCE_ROOT)/scheduler/accounting.yaml" \
+		--stage-output "$(PROVENANCE_ROOT)/logs/collect_mock_lsf.stage.json"
 
 run-simulation: ## Execute the controlled synthetic simulation stage.
 	uv run provenance run-simulation \

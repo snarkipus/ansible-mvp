@@ -15,7 +15,8 @@ workflow_stage_targets:
   - materialize-procs
   - inventory-pre
   - submit-mock-lsf
-  - run-simulation
+  - wait-mock-lsf
+  - collect-mock-lsf
   - extract-required
   - extract-ad-hoc
   - build-reports

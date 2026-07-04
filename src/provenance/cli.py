@@ -34,7 +34,11 @@ from provenance.manifest import (
 )
 from provenance.preflight import PreflightError, run_preflight
 from provenance.reports import build_report_product_evidence
-from provenance.scheduler import write_mock_lsf_metadata
+from provenance.scheduler import (
+    collect_mock_lsf_accounting,
+    submit_mock_lsf_job,
+    wait_mock_lsf_job,
+)
 from provenance.stages import (
     run_ad_hoc_extraction,
     run_required_extraction,
@@ -111,13 +115,36 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_materialization_arguments(materialize_procs)
     materialize_procs.set_defaults(func=_cmd_materialize_procs)
 
-    mock_lsf = subparsers.add_parser("submit-mock-lsf", help="write mock LSF scheduler metadata")
+    mock_lsf = subparsers.add_parser("submit-mock-lsf", help="submit local async mock LSF job")
     mock_lsf.add_argument("--config", type=Path, default=Path("configs/run.synthetic.yaml"))
     mock_lsf.add_argument("--run-id", required=True)
     mock_lsf.add_argument("--workspace-root", type=Path, default=Path("."))
+    mock_lsf.add_argument("--controlled-source-repo", type=Path, required=True)
     mock_lsf.add_argument("--output", type=Path, help="optional scheduler YAML output path")
     mock_lsf.add_argument("--stage-output", type=Path, help="optional stage JSON output path")
     mock_lsf.set_defaults(func=_cmd_submit_mock_lsf)
+
+    wait_mock_lsf = subparsers.add_parser("wait-mock-lsf", help="wait for mock LSF job")
+    wait_mock_lsf.add_argument("--config", type=Path, default=Path("configs/run.synthetic.yaml"))
+    wait_mock_lsf.add_argument("--run-id", required=True)
+    wait_mock_lsf.add_argument("--workspace-root", type=Path, default=Path("."))
+    wait_mock_lsf.add_argument("--output", type=Path, help="optional job-state JSON output path")
+    wait_mock_lsf.add_argument("--stage-output", type=Path, help="optional stage JSON output path")
+    wait_mock_lsf.set_defaults(func=_cmd_wait_mock_lsf)
+
+    collect_mock_lsf = subparsers.add_parser(
+        "collect-mock-lsf", help="collect mock LSF accounting evidence"
+    )
+    collect_mock_lsf.add_argument("--config", type=Path, default=Path("configs/run.synthetic.yaml"))
+    collect_mock_lsf.add_argument("--run-id", required=True)
+    collect_mock_lsf.add_argument("--workspace-root", type=Path, default=Path("."))
+    collect_mock_lsf.add_argument(
+        "--output", type=Path, help="optional accounting YAML output path"
+    )
+    collect_mock_lsf.add_argument(
+        "--stage-output", type=Path, help="optional stage JSON output path"
+    )
+    collect_mock_lsf.set_defaults(func=_cmd_collect_mock_lsf)
 
     run_simulation = subparsers.add_parser(
         "run-simulation", help="execute the controlled synthetic simulation stage"
@@ -380,10 +407,11 @@ def _cmd_materialize_procs(args: argparse.Namespace) -> int:
 
 def _cmd_submit_mock_lsf(args: argparse.Namespace) -> int:
     started_at = _utc_now()
-    payload = write_mock_lsf_metadata(
+    payload = submit_mock_lsf_job(
         config_path=args.config,
         run_id=args.run_id,
         workspace_root=args.workspace_root,
+        controlled_source_repo=args.controlled_source_repo,
         output=args.output,
     )
     finished_at = _utc_now()
@@ -392,6 +420,49 @@ def _cmd_submit_mock_lsf(args: argparse.Namespace) -> int:
         args, "submit_mock_lsf", started_at=started_at, finished_at=finished_at
     )
     return 0
+
+
+def _cmd_wait_mock_lsf(args: argparse.Namespace) -> int:
+    started_at = _utc_now()
+    payload = wait_mock_lsf_job(
+        config_path=args.config,
+        run_id=args.run_id,
+        workspace_root=args.workspace_root,
+    )
+    finished_at = _utc_now()
+    _write_json(payload, args.output)
+    status = "pass" if payload.get("state") == "DONE" else "fail"
+    _write_support_stage_attempt(
+        args,
+        "wait_mock_lsf",
+        started_at=started_at,
+        finished_at=finished_at,
+        status=status,
+        return_code=0 if status == "pass" else 1,
+    )
+    return 0 if status == "pass" else 1
+
+
+def _cmd_collect_mock_lsf(args: argparse.Namespace) -> int:
+    started_at = _utc_now()
+    payload = collect_mock_lsf_accounting(
+        config_path=args.config,
+        run_id=args.run_id,
+        workspace_root=args.workspace_root,
+        output=args.output,
+    )
+    finished_at = _utc_now()
+    _write_json(payload, None)
+    status = "pass" if payload.get("state") == "DONE" else "fail"
+    _write_support_stage_attempt(
+        args,
+        "collect_mock_lsf",
+        started_at=started_at,
+        finished_at=finished_at,
+        status=status,
+        return_code=0 if status == "pass" else 1,
+    )
+    return 0 if status == "pass" else 1
 
 
 def _cmd_run_simulation(args: argparse.Namespace) -> int:
@@ -493,6 +564,8 @@ def _write_support_stage_attempt(
     started_at: datetime,
     finished_at: datetime,
     controlled_source_repo: Path | None = None,
+    status: str = "pass",
+    return_code: int | None = 0,
 ) -> None:
     output = getattr(args, "stage_output", None)
     if output is None:
@@ -505,6 +578,8 @@ def _write_support_stage_attempt(
         controlled_source_repo=controlled_source_repo,
         started_at=started_at,
         finished_at=finished_at,
+        status=status,
+        return_code=return_code,
         evidence_path=output,
     )
     _write_json(payload, output)

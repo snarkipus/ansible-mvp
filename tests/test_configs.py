@@ -43,6 +43,8 @@ def test_run_config_declares_controlled_scripts_and_stage_commands() -> None:
         "inventory_pre",
         "submit_mock_lsf",
         "run_simulation",
+        "wait_mock_lsf",
+        "collect_mock_lsf",
         "extract_required",
         "extract_ad_hoc",
         "build_reports",
