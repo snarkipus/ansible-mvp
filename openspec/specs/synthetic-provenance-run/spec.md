@@ -52,6 +52,28 @@ The system SHALL write provenance evidence and derived products under `runs/{run
 - **WHEN** report generation completes in a clean synthetic run
 - **THEN** `summary.xlsx`, `chart.png`, and `briefing.pptx` exist under `runs/{run_id}/provenance/products/reports/`
 
+#### Scenario: Generated run evidence is not committed to Git
+- **WHEN** ordinary run outputs, manifests, logs, scheduler evidence, inventories, validations, extracted products, or report products are generated under `runs/{run_id}/`
+- **THEN** they remain generated run evidence and are not committed to the wrapper repository
+
+### Requirement: Source repository stores factory definition
+The system SHALL use Git for factory definition artifacts and not for ordinary run evidence.
+
+#### Scenario: Factory definition is versioned
+- **WHEN** the wrapper repository is committed
+- **THEN** Git tracks source code, Makefile, Ansible playbooks, configuration, specs, tests, docs, lockfiles, and intentionally curated small fixtures or examples
+
+#### Scenario: Archive/freeze is separate from Git commits
+- **WHEN** a run is selected for future archive or promotion
+- **THEN** the archived evidence is controlled by archive/freeze policy rather than by committing ordinary `runs/{run_id}/` outputs to Git
+
+### Requirement: Archive policy preserves simulation boundary
+The system SHALL preserve the boundary between `sim-run-root/` runtime contract and `provenance/` evidence sidecar when defining future archive/freeze behavior.
+
+#### Scenario: Frozen runs preserve consumed inputs and evidence
+- **WHEN** a future archive/freeze operation packages a successful run
+- **THEN** it preserves the manifest, checksums, validations, logs, inventories, selected products, and exact consumed inputs without moving provenance evidence into `sim-run-root/`
+
 ### Requirement: Mock scheduler metadata is captured
 The system SHALL emulate LSF scheduling for the MVP without requiring real LSF commands.
 
