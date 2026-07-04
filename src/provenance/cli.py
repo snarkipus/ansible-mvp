@@ -23,7 +23,7 @@ from provenance.git_state import (
     tracked_file_state,
 )
 from provenance.hashing import hash_artifact, sha256_file
-from provenance.inventory import InventoryRecord, inventory_files, with_sha256
+from provenance.inventory import inventory_files, with_sha256
 from provenance.manifest import (
     ManifestAssemblyInput,
     assemble_manifest,
@@ -178,6 +178,7 @@ def _build_parser() -> argparse.ArgumentParser:
     inventory_post = subparsers.add_parser(
         "inventory-post", help="write post-run raw-output and derived-product inventories"
     )
+    inventory_post.add_argument("--config", type=Path, default=Path("configs/run.synthetic.yaml"))
     inventory_post.add_argument("--run-id", required=True)
     inventory_post.add_argument("--workspace-root", type=Path, default=Path("."))
     inventory_post.add_argument("--raw-output", type=Path)
@@ -566,10 +567,14 @@ def _cmd_inventory_post(args: argparse.Namespace) -> int:
     inventory_root = provenance_root / "inventories"
     raw_output = args.raw_output or inventory_root / "post_run_raw_outputs.json"
     products_output = args.products_output or inventory_root / "post_run_derived_products.json"
+    config = read_config_mapping(args.config)
 
     raw_outputs = _post_run_raw_output_records(root=root, run_root=run_root, sim_root=sim_root)
     products = _post_run_derived_product_records(
-        root=root, run_root=run_root, provenance_root=provenance_root
+        root=root,
+        run_root=run_root,
+        provenance_root=provenance_root,
+        producing_stages=_producing_stages_by_output(config),
     )
     _write_json(raw_outputs, raw_output)
     _write_json(products, products_output)
@@ -629,7 +634,11 @@ def _post_run_raw_output_records(
 
 
 def _post_run_derived_product_records(
-    *, root: Path, run_root: Path, provenance_root: Path
+    *,
+    root: Path,
+    run_root: Path,
+    provenance_root: Path,
+    producing_stages: dict[str, str],
 ) -> list[dict[str, Any]]:
     payload: list[dict[str, Any]] = []
     for record in inventory_files(provenance_root):
@@ -643,21 +652,27 @@ def _post_run_derived_product_records(
         entry["workflow_relative_path"] = absolute_path.relative_to(run_root).as_posix()
         entry["run_relative_path"] = absolute_path.relative_to(root).as_posix()
         entry["hash_status"] = "hashed"
-        entry["producing_stage"] = _producing_stage_for_product(hashed)
+        entry["producing_stage"] = producing_stages.get(entry["workflow_relative_path"])
         payload.append(entry)
     return payload
 
 
-def _producing_stage_for_product(record: InventoryRecord) -> str | None:
-    if record.product_area == "reports":
-        return "build_reports"
-    if record.product_area == "extracted":
-        name = Path(record.relative_path).name
-        if name == "required.csv":
-            return "extract_required"
-        if name == "ad_hoc.csv":
-            return "extract_ad_hoc"
-    return None
+def _producing_stages_by_output(config: dict[str, Any]) -> dict[str, str]:
+    stages = config.get("stages")
+    if not isinstance(stages, list):
+        raise ValueError("stages must be a list")
+    producing_stages: dict[str, str] = {}
+    for index, raw_stage in enumerate(stages):
+        if not isinstance(raw_stage, dict):
+            raise ValueError(f"stages[{index}] must be a mapping")
+        stage_name = raw_stage.get("name")
+        outputs = raw_stage.get("outputs", [])
+        if not isinstance(stage_name, str) or not isinstance(outputs, list):
+            continue
+        for output in outputs:
+            if isinstance(output, str) and output.startswith("provenance/products/"):
+                producing_stages[output] = stage_name
+    return producing_stages
 
 
 def _materialized_artifacts_by_destination(path: Path) -> dict[str, dict[str, Any]]:

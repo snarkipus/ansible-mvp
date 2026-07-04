@@ -122,6 +122,7 @@ inventory-pre: ## Inventory pre-run controlled inputs and runtime scripts.
 
 inventory-post: ## Inventory post-run raw outputs and derived products.
 	uv run provenance inventory-post \
+		--config configs/run.synthetic.yaml \
 		--run-id "$(RUN_ID)" \
 		--workspace-root . \
 		--raw-output "$(PROVENANCE_ROOT)/inventories/post_run_raw_outputs.json" \

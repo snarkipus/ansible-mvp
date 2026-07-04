@@ -8,6 +8,7 @@ from pytest import MonkeyPatch
 
 import provenance.cli as cli
 from provenance.cli import main
+from provenance.config import read_config_mapping
 from provenance.manifest import REQUIRED_TOP_LEVEL_SECTIONS
 
 
@@ -106,11 +107,46 @@ def test_cli_inventory_post_writes_raw_output_and_derived_product_inventories(
         "logical_group,example,bytes,sha256_prefix\ndirC,ex1.dat,4,aaaa\n",
         encoding="utf-8",
     )
+    (provenance_root / "products" / "extracted" / "custom.csv").write_text(
+        "case,value\nb,2\n",
+        encoding="utf-8",
+    )
     (provenance_root / "products" / "reports" / "summary.xlsx").write_text(
         "report\n", encoding="utf-8"
     )
+    config_path = tmp_path / "run.synthetic.yaml"
+    config = read_config_mapping(Path("configs/run.synthetic.yaml"))
+    assert isinstance(config["stages"], list)
+    config["stages"].append(
+        {
+            "name": "custom_extract",
+            "display_name": "Custom extract",
+            "lifecycle_class": "factory",
+            "display_order": 85,
+            "operator_visible": True,
+            "command": "scripts/custom_extract.py",
+            "working_directory": "controlled_source_repo",
+            "command_kind": "controlled_source_script",
+            "approved_command_path": "scripts/custom_extract.py",
+            "outputs": ["provenance/products/extracted/custom.csv"],
+        }
+    )
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
 
-    assert main(["inventory-post", "--run-id", "demo_001", "--workspace-root", str(tmp_path)]) == 0
+    assert (
+        main(
+            [
+                "inventory-post",
+                "--config",
+                str(config_path),
+                "--run-id",
+                "demo_001",
+                "--workspace-root",
+                str(tmp_path),
+            ]
+        )
+        == 0
+    )
 
     summary = json.loads(capsys.readouterr().out)
     raw_outputs = json.loads(
@@ -120,7 +156,7 @@ def test_cli_inventory_post_writes_raw_output_and_derived_product_inventories(
         (inventory_root / "post_run_derived_products.json").read_text(encoding="utf-8")
     )
     assert summary["raw_output_count"] == 1
-    assert summary["derived_product_count"] == 2
+    assert summary["derived_product_count"] == 3
     assert raw_outputs[0]["relative_path"] == "lists/dirC/sim-out.dat"
     assert raw_outputs[0]["workflow_relative_path"] == "sim-run-root/lists/dirC/sim-out.dat"
     assert (
@@ -136,6 +172,9 @@ def test_cli_inventory_post_writes_raw_output_and_derived_product_inventories(
     assert (
         by_path["provenance/products/extracted/required.csv"]["producing_stage"]
         == "extract_required"
+    )
+    assert (
+        by_path["provenance/products/extracted/custom.csv"]["producing_stage"] == "custom_extract"
     )
     assert by_path["provenance/products/reports/summary.xlsx"]["role"] == "report_product"
     assert by_path["provenance/products/reports/summary.xlsx"]["producing_stage"] == "build_reports"
