@@ -58,6 +58,20 @@ def test_run_config_declares_controlled_scripts_and_stage_commands() -> None:
         assert set(stage.get("expected_controlled_scripts", ())).issubset(script_names)
 
 
+def test_run_config_controls_behavior_affecting_wrapper_files() -> None:
+    config = _load_yaml("configs/run.synthetic.yaml")
+
+    wrapper = config["repositories"]["wrapper"]
+    assert isinstance(wrapper, dict)
+    controlled_paths = set(wrapper["controlled_paths"])
+    assert {
+        "pyproject.toml",
+        "uv.lock",
+        "src/provenance/__init__.py",
+        "src/provenance/config.py",
+    }.issubset(controlled_paths)
+
+
 def test_run_config_links_layout_hash_policy_and_validation_expectations() -> None:
     config = _load_yaml("configs/run.synthetic.yaml")
     shape = _load_yaml("configs/expected_shape.required_extract.yaml")

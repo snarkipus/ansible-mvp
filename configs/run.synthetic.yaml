@@ -15,8 +15,11 @@ repositories:
       - ansible/playbooks/run_synthetic_workflow.yml
       - configs/run.synthetic.yaml
       - configs/expected_shape.required_extract.yaml
+      - pyproject.toml
       - scripts/bootstrap_controlled_source.sh
+      - src/provenance/__init__.py
       - src/provenance/cli.py
+      - src/provenance/config.py
       - src/provenance/git_state.py
       - src/provenance/hashing.py
       - src/provenance/inventory.py
@@ -27,6 +30,7 @@ repositories:
       - src/provenance/stages.py
       - src/provenance/validation.py
       - src/provenance/workspace.py
+      - uv.lock
   controlled_source:
     name: controlled-source-demo
     path_variable: controlled_source_repo
