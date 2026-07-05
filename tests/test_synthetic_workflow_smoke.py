@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -210,6 +211,47 @@ def test_preflight_smoke_rejects_uncontrolled_stage_command_and_missing_ref(
     assert "uncontrolled approved_command_path" in _combined_output(uncontrolled)
     assert missing_ref.returncode != 0
     assert "controlled source ref failed to resolve" in _combined_output(missing_ref)
+
+
+def test_extract_required_smoke_rejects_non_done_scheduler_state(tmp_path: Path) -> None:
+    wrapper = _prepare_wrapper_checkout(tmp_path)
+    controlled = _bootstrap_controlled_source(wrapper)
+    run_id = "extract_refuses_run_state"
+    sim_output = wrapper / "runs" / run_id / "sim-run-root" / "lists" / "dirC" / "sim-out.dat"
+    scheduler_state = wrapper / "runs" / run_id / "provenance" / "scheduler" / "job-state.json"
+    sim_output.parent.mkdir(parents=True)
+    scheduler_state.parent.mkdir(parents=True)
+    sim_output.write_text(
+        "logical_group,example,bytes,sha256_prefix\ndirC,ex1.dat,13,7fee469deaea\n",
+        encoding="utf-8",
+    )
+    scheduler_state.write_text(
+        json.dumps(
+            {
+                "run_id": run_id,
+                "scheduler": "mock_lsf",
+                "job_id": f"mock-{run_id}",
+                "state": "RUN",
+                "exit_code": None,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = _run(
+        [
+            "make",
+            "extract-required",
+            f"RUN_ID={run_id}",
+            f"CONTROLLED_SOURCE_REPO={controlled}",
+        ],
+        cwd=wrapper,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "requires terminal scheduler DONE" in _combined_output(result)
+    assert "'RUN'" in _combined_output(result)
 
 
 def _prepare_wrapper_checkout(tmp_path: Path) -> Path:

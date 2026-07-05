@@ -540,6 +540,108 @@ def test_mock_lsf_collect_rejects_non_terminal_job(tmp_path: Path) -> None:
         raise AssertionError("collect should fail before terminal scheduler state")
 
 
+def test_mock_lsf_payload_nonzero_exit_is_recorded_by_wrapper(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "run.synthetic.yaml"
+    controlled_repo = _create_controlled_source_repo(tmp_path / "controlled-source-demo")
+    _write_config(config_path)
+    _set_runtime_delay(config_path, minimum=0.0, maximum=0.0, timeout=2.0)
+    _prepare_scheduler_payload(
+        config_path=config_path,
+        run_id="demo_006d",
+        workspace_root=tmp_path,
+        controlled_repo=controlled_repo,
+    )
+    materialized_script = tmp_path / "runs/demo_006d/sim-run-root/procs/run-script.sh"
+    materialized_script.write_text("#!/usr/bin/env bash\nexit 7\n", encoding="utf-8")
+    materialized_script.chmod(0o755)
+
+    submit_mock_lsf_job(
+        config_path=config_path,
+        run_id="demo_006d",
+        workspace_root=tmp_path,
+        controlled_source_repo=controlled_repo,
+    )
+
+    terminal_state = wait_mock_lsf_job(
+        config_path=config_path, run_id="demo_006d", workspace_root=tmp_path
+    )
+
+    assert terminal_state["state"] == "EXIT"
+    assert terminal_state["exit_code"] == 7
+    accounting = collect_mock_lsf_accounting(
+        config_path=config_path, run_id="demo_006d", workspace_root=tmp_path
+    )
+    assert accounting["state"] == "EXIT"
+    assert accounting["exit_code"] == 7
+
+
+def test_mock_lsf_wait_records_missing_pid_as_failed_terminal_evidence(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "run.synthetic.yaml"
+    _write_config(config_path)
+    prepare_workspace(config_path=config_path, run_id="demo_006e", workspace_root=tmp_path)
+    scheduler_root = tmp_path / "runs/demo_006e/provenance/scheduler"
+    state_path = scheduler_root / "job-state.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "run_id": "demo_006e",
+                "scheduler": "mock_lsf",
+                "job_id": "mock-demo_006e",
+                "state": "RUN",
+                "pid": None,
+                "exit_code": None,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    terminal_state = wait_mock_lsf_job(
+        config_path=config_path, run_id="demo_006e", workspace_root=tmp_path
+    )
+
+    assert terminal_state["state"] == "EXIT"
+    assert terminal_state["status_reason"] == "process_vanished_missing_terminal_state"
+    assert terminal_state["pid"] is None
+    assert terminal_state["wait_observations"][0]["pid_alive"] is False
+
+
+def test_mock_lsf_wait_records_vanished_stale_non_terminal_process(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "run.synthetic.yaml"
+    _write_config(config_path)
+    prepare_workspace(config_path=config_path, run_id="demo_006f", workspace_root=tmp_path)
+    scheduler_root = tmp_path / "runs/demo_006f/provenance/scheduler"
+    state_path = scheduler_root / "job-state.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "run_id": "demo_006f",
+                "scheduler": "mock_lsf",
+                "job_id": "mock-demo_006f",
+                "state": "RUN",
+                "pid": 999_999_999,
+                "exit_code": None,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    terminal_state = wait_mock_lsf_job(
+        config_path=config_path, run_id="demo_006f", workspace_root=tmp_path
+    )
+
+    assert terminal_state["state"] == "EXIT"
+    assert terminal_state["status_reason"] == "process_vanished_missing_terminal_state"
+    assert terminal_state["pid"] == 999_999_999
+    assert terminal_state["wait_observations"][0]["state"] == "RUN"
+    assert terminal_state["wait_observations"][0]["pid_alive"] is False
+
+
 def test_run_synthetic_simulation_writes_raw_output_and_stage_evidence(
     tmp_path: Path,
 ) -> None:

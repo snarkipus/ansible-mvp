@@ -36,8 +36,8 @@
 
 ## 5. Tests and Validation
 
-- [ ] 5.1 Add scheduler unit tests for submit returning before terminal state, wrapper-recorded exit code, wait terminal success, wait timeout cleanup, payload nonzero exit, missing PID, stale non-terminal state, vanished process, and collect-before-terminal failure.
-- [ ] 5.2 Add preflight tests for approved and rejected mock scheduler payload commands.
-- [ ] 5.3 Update synthetic workflow smoke tests to cover the clean async scheduler flow with short deterministic delay settings and extraction refusal when scheduler state is not terminal `DONE`.
-- [ ] 5.4 Update manifest tests to verify scheduler evidence links, operator flow, and payload stage evidence remain complete.
-- [ ] 5.5 Run `make check`, strict OpenSpec validation, and `bd lint --json` before closing implementation work.
+- [x] 5.1 Add scheduler unit tests for submit returning before terminal state, wrapper-recorded exit code, wait terminal success, wait timeout cleanup, payload nonzero exit, missing PID, stale non-terminal state, vanished process, and collect-before-terminal failure.
+- [x] 5.2 Add preflight tests for approved and rejected mock scheduler payload commands.
+- [x] 5.3 Update synthetic workflow smoke tests to cover the clean async scheduler flow with short deterministic delay settings and extraction refusal when scheduler state is not terminal `DONE`.
+- [x] 5.4 Update manifest tests to verify scheduler evidence links, operator flow, and payload stage evidence remain complete.
+- [x] 5.5 Run `make check`, strict OpenSpec validation, and `bd lint --json` before closing implementation work.
