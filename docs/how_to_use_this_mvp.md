@@ -117,6 +117,36 @@ successful preflight may create `runs/{run_id}/provenance/preflight.json` and
 rest of the run directories. Freshness or controlled-source failures occur before
 new run evidence is written.
 
+### Make targets for focused debugging
+
+The granular stage targets, in configured order:
+
+```text
+make preflight
+make prepare-workspace
+make materialize-inputs
+make materialize-procs
+make inventory-pre
+make submit-mock-lsf
+make wait-mock-lsf
+make collect-mock-lsf
+make extract-required
+make extract-ad-hoc
+make build-reports
+make validate
+make inventory-post
+make manifest
+make manifest-smoke
+```
+
+Supporting targets: `make bootstrap-controlled-source` (demo bootstrap),
+`make run-simulation` (direct payload execution for debugging only; normal
+runs cross the scheduler boundary instead), `make format`, `make lint`,
+`make typecheck`, `make test`, `make check`, and `make clean`.
+
+Stage order comes from `configs/run.synthetic.yaml`; Ansible queries it via
+the Python helper rather than hard-coding a target list.
+
 ## Expected Outputs
 
 A successful run creates this high-level shape:
@@ -262,8 +292,8 @@ When adding a new stage or artifact:
   `provenance/scheduler/job-state.json`, `terminal-state.json`, `accounting.yaml`
   if present, scheduler `stdout.log`/`stderr.log`, and
   `provenance/logs/run_simulation.stage.json` if the payload reached execution.
-  Extraction intentionally refuses `EXIT`, `TIMEOUT`, `UNKNOWN`, missing state, or
-  stale non-terminal state.
+  Extraction intentionally refuses `EXIT`, `TIMEOUT`, missing state, or stale
+  non-terminal state; only terminal `DONE` allows extraction.
 - **CSV validation failure:** compare the generated CSV with
   `configs/expected_shape.required_extract.yaml`.
 - **Real LSF tools are absent:** this is expected for the MVP; mock scheduler mode
@@ -323,47 +353,39 @@ openspec validate --specs --strict --json
 bd lint --json
 ```
 
-## Final MVP Verification and Deferred Limitations
+## Evidence Caveats
 
-Final verification for the MVP scaffold was refreshed on 2026-07-04 with:
+Read these before treating run evidence as more than it claims to be:
 
-```bash
-make bootstrap-controlled-source
-make check
-ansible-playbook ansible/playbooks/run_synthetic_workflow.yml \
-  -i ansible/inventory/localhost.ini \
-  -e run_id=final_verification_20260704_hardening2 \
-  -e controlled_source_repo=../controlled-source-demo \
-  -e controlled_source_ref=controlled-source-demo-v0.1.1
-```
+- **Support-stage evidence is an orchestration record, not a process audit.**
+  For support targets such as `preflight`, inventory, validation, manifest
+  assembly, and manifest smoke checks, the Python helpers write success
+  evidence after the target completes rather than capturing the exact
+  Make/Ansible process streams. Executable simulation and extraction stages
+  capture observed return codes and stdout/stderr directly.
+- **No time-of-check/time-of-use lock.** Extraction stages execute scripts
+  from the live controlled-source worktree after preflight has verified the
+  requested ref and clean state. The local MVP assumes the worktree remains
+  unchanged between Make targets; it does not re-hash scripts at execution
+  time.
+- **Evidence is host-bound.** Manifest evidence may include absolute local
+  host paths. This MVP produces local evidence, not a portable archive
+  format, so those paths are accepted context rather than normalized or
+  redacted metadata.
 
-The bootstrap, quality gate, and clean synthetic workflow completed successfully.
-The manifest included run-level timestamps and `run.execution_context`. A second
-Ansible run with the same `run_id` failed at preflight because the run root
-already existed, and `make preflight RUN_ROOT_POLICY=reuse` succeeded for the
-same run id as an explicit focused-debugging escape hatch.
-Maintainer-only OpenSpec and bead hygiene checks were also run during development;
-they are not required for ordinary demo execution.
-Generated verification outputs are intentionally ignored under `runs/`.
+Known deferred limitations are tracked as follow-up beads rather than
+implemented in this MVP: production real-LSF integration, safe failed-run
+resume semantics, long-term artifact archival/formal schema validation, and
+production-scale hash policy for large outputs. See the Current limitations
+section of the [README](../README.md) for the full list.
 
-Support-stage evidence is an MVP orchestration record. For support targets such as
-`preflight`, inventory, validation, manifest assembly, and manifest smoke checks,
-the Python helpers write success evidence after the target completes rather than
-capturing the exact Make/Ansible process streams. Executable simulation and
-extraction stages capture observed return codes and stdout/stderr directly. Do
-not treat support-stage evidence as a production-grade scheduler or shell audit
-trail.
+## Where to Read Next
 
-Extraction stages execute scripts from the live controlled-source worktree after
-preflight has verified the requested ref and clean state. The local MVP assumes
-the worktree remains unchanged between Make targets; it does not re-hash scripts
-at execution time or model a production-grade time-of-check/time-of-use lock.
-
-Manifest evidence may include absolute local host paths. This MVP is intended as
-host-bound local evidence, not a portable archive format, so those paths are
-accepted context rather than normalized or redacted metadata.
-
-Known deferred limitations are tracked as follow-up beads rather than implemented in
-this MVP: production real-LSF integration, safe failed-run resume semantics,
-long-term artifact archival/formal schema validation, and production-scale hash
-policy for large outputs.
+- [`trace_required_csv.md`](trace_required_csv.md) — follow `required.csv`
+  from controlled tag through scheduler evidence to validated, manifest-linked
+  product. The best way to understand what the evidence buys you.
+- [`architecture.md`](architecture.md) — tool roles and rationale, run
+  layout, stage contract, scheduler seam, hashing policy, and manifest
+  expectations.
+- [`archive/`](archive/) — historical design notes and dated verification
+  logs, including the final MVP scaffold verification from 2026-07-04.
