@@ -1,9 +1,7 @@
 ## Purpose
 
 Define the run-level provenance manifest contract, including repository state, controlled source gate results, materialized inputs and scripts, stage evidence, raw outputs, derived products, validations, hashes, and quality gates.
-
 ## Requirements
-
 ### Requirement: Manifest captures run identity and repository state
 The system SHALL emit `runs/{run_id}/provenance/manifest.yaml` with run identity and repository state for required repositories.
 
@@ -49,21 +47,22 @@ The system SHALL record how every input artifact entered or participated in the 
 - **THEN** the manifest records the rendered file as a materialized consumed input with template identity, reference identities, render context evidence, rendered destination path, SHA-256 hash, and stage evidence
 
 ### Requirement: Manifest captures stage execution
-The system SHALL record each major stage with command, working directory, timestamps, status, return code, logs, controlled scripts, inputs, and outputs.
+The system SHALL record each major stage with command, working directory, timestamps, status, return code, logs, controlled scripts, inputs, and outputs, including scheduler-mediated payload execution.
 
-#### Scenario: Simulation stage is recorded
-- **WHEN** the synthetic simulation stage completes successfully
+#### Scenario: Simulation payload stage is recorded
+- **WHEN** the synthetic simulation payload completes through the mock scheduler boundary
 - **THEN** the manifest stage record includes the materialized run script command, `sim-run-root` working directory, logs, consumed inputs, and produced raw output `sim-run-root/lists/dirC/sim-out.dat`
+- **AND** the stage record is linkable from scheduler job state or accounting evidence
 
 #### Scenario: Extraction stage is recorded
-- **WHEN** a controlled extraction script creates an extracted CSV
-- **THEN** the manifest stage record links the extraction command, controlled script identity, source raw outputs, log paths, and derived CSV product
+- **WHEN** a controlled extraction script creates an extracted CSV after terminal scheduler `DONE`
+- **THEN** the manifest stage record links the extraction command, controlled script identity, source raw outputs, log paths, scheduler success prerequisite, and derived CSV product
 
 ### Requirement: Manifest captures every configured stage attempt
 The system SHALL emit first-class stage-attempt evidence for every configured workflow stage, including support and orchestration stages that do not execute controlled simulation or extraction scripts directly.
 
 #### Scenario: Support stage attempt is recorded
-- **WHEN** a clean synthetic run completes a support stage such as `preflight`, `prepare_workspace`, `materialize_inputs`, `materialize_procs`, `inventory_pre`, `submit_mock_lsf`, `inventory_post`, `manifest`, or `manifest_smoke`
+- **WHEN** a clean synthetic run completes a support stage such as `preflight`, `prepare_workspace`, `materialize_inputs`, `materialize_procs`, `inventory_pre`, `submit_mock_lsf`, `wait_mock_lsf`, `collect_mock_lsf`, `inventory_post`, `manifest`, or `manifest_smoke`
 - **THEN** the run writes stage-attempt evidence with stage name, display name, lifecycle class, display order, operator-visibility value, status, command, working directory or cwd, configured inputs, configured outputs, evidence path, timing, and return code where applicable
 
 #### Scenario: Manifest includes configured stage order
@@ -142,3 +141,27 @@ The system SHALL provide repeatable Python quality checks using `uv`, `ruff`, `b
 #### Scenario: Python quality gate succeeds
 - **WHEN** the repository is checked with the documented quality target
 - **THEN** `ruff format --check`, `ruff check`, `basedpyright`, and `pytest` run through `uv` and complete successfully
+
+### Requirement: Manifest captures async scheduler boundary evidence
+The system SHALL represent mock scheduler submission, job state, accounting, and payload execution evidence as distinct linked manifest concepts.
+
+#### Scenario: Scheduler boundary evidence is linked
+- **WHEN** a clean synthetic run completes through the local async mock scheduler
+- **THEN** the manifest scheduler section links to submission evidence, terminal job state evidence, accounting evidence, job id, final scheduler state, payload execution evidence, and future real-LSF evidence equivalents where recorded
+
+#### Scenario: Scheduler failure is represented
+- **WHEN** the mock scheduler job exits unsuccessfully, times out, or cannot be collected because it is non-terminal
+- **THEN** available scheduler evidence records the failed or non-terminal condition for manifest assembly or failure diagnosis
+
+### Requirement: Operator workflow summarizes async scheduler phases
+The system SHALL summarize the operator-facing workflow as scheduler-mediated simulation execution while preserving the complete detailed stage list.
+
+#### Scenario: Operator flow includes scheduler phases
+- **WHEN** manifest assembly builds `workflow.operator_flow` for a clean synthetic run
+- **THEN** the operator flow includes submit simulation, wait for simulation, collect scheduler evidence, and downstream extraction/report stages in display order
+- **AND** it does not present direct payload execution as an operator action outside the scheduler boundary
+
+#### Scenario: Detailed payload evidence remains complete
+- **WHEN** the manifest includes `workflow.operator_flow`
+- **THEN** the complete `stages` section still includes payload execution evidence and all support stages needed for auditability
+
