@@ -91,9 +91,10 @@ def submit_mock_lsf_job(
         )
 
     state = _read_json_mapping(state_path)
-    if state.get("state") not in {"DONE", "EXIT", "TIMEOUT", "UNKNOWN"}:
+    if state.get("state") not in _TERMINAL_STATES:
         state["pid"] = process.pid
         state["process_group_id"] = process.pid
+        state["process_start_time_ticks"] = _process_start_time_ticks(process.pid)
         _write_json(state_path, state)
 
     payload = {
@@ -113,6 +114,7 @@ def submit_mock_lsf_job(
             "submitted_at_utc": _format_timestamp(submitted_at),
             "pid": process.pid,
             "process_group_id": process.pid,
+            "process_start_time_ticks": state.get("process_start_time_ticks"),
         },
         "metadata_path": _relative(context["root"], context["submission_path"]),
         "job_state_path": _relative(context["root"], state_path),
@@ -156,16 +158,18 @@ def wait_mock_lsf_job(
             {
                 "observed_at": _format_timestamp(_utc_now()),
                 "state": current.get("state"),
-                "pid_alive": _pid_alive(current.get("pid")),
+                "pid_alive": _pid_alive(
+                    current.get("pid"), current.get("process_start_time_ticks")
+                ),
             }
         )
-        if current.get("state") in {"DONE", "EXIT", "TIMEOUT", "UNKNOWN"}:
+        if current.get("state") in _TERMINAL_STATES:
             current["wait_observations"] = observations
             _write_json(state_path, current)
             return current
         if time.monotonic() >= deadline:
             return _record_timeout(context, current, observations)
-        if not _pid_alive(current.get("pid")):
+        if not _pid_alive(current.get("pid"), current.get("process_start_time_ticks")):
             terminal = _read_optional_json_mapping(context["terminal_state_path"])
             if terminal is not None:
                 terminal["wait_observations"] = observations
@@ -195,7 +199,7 @@ def collect_mock_lsf_accounting(
 
     context = _scheduler_context(config_path, run_id, workspace_root)
     state = _read_json_mapping(context["state_path"])
-    if state.get("state") not in {"DONE", "EXIT", "TIMEOUT", "UNKNOWN"}:
+    if state.get("state") not in _TERMINAL_STATES:
         raise ValueError(f"mock LSF job is not terminal: {state.get('state')}")
 
     started_at = state.get("started_at")
@@ -232,7 +236,7 @@ def run_mock_lsf_wrapper(
 
     context = _scheduler_context(config_path, run_id, workspace_root)
     state_path = context["state_path"]
-    state = _read_json_mapping(state_path)
+    state = _wait_for_submitted_state_with_pid(state_path)
     started_at = _utc_now()
     state["state"] = "RUN"
     state["started_at"] = _format_timestamp(started_at)
@@ -374,19 +378,53 @@ def _has_live_existing_job(path: Path) -> bool:
     if not path.is_file():
         return False
     state = _read_json_mapping(path)
-    return state.get("state") not in {"DONE", "EXIT", "TIMEOUT", "UNKNOWN"} and _pid_alive(
-        state.get("pid")
+    return state.get("state") not in _TERMINAL_STATES and _pid_alive(
+        state.get("pid"), state.get("process_start_time_ticks")
     )
 
 
-def _pid_alive(pid: object) -> bool:
+_TERMINAL_STATES = {"DONE", "EXIT", "TIMEOUT"}
+
+
+def _wait_for_submitted_state_with_pid(path: Path) -> dict[str, Any]:
+    deadline = time.monotonic() + 5.0
+    state = _read_json_mapping(path)
+    while state.get("pid") is None and state.get("state") not in _TERMINAL_STATES:
+        if time.monotonic() >= deadline:
+            raise ValueError(f"mock LSF submit did not publish process identity: {path}")
+        time.sleep(0.01)
+        state = _read_json_mapping(path)
+    return state
+
+
+def _pid_alive(pid: object, process_start_time_ticks: object = None) -> bool:
     if not isinstance(pid, int) or pid <= 0:
+        return False
+    current_start_time = _process_start_time_ticks(pid)
+    if isinstance(process_start_time_ticks, int) and current_start_time != process_start_time_ticks:
         return False
     try:
         os.kill(pid, 0)
     except OSError as error:
         return error.errno != errno.ESRCH
     return True
+
+
+def _process_start_time_ticks(pid: int) -> int | None:
+    stat_path = Path(f"/proc/{pid}/stat")
+    if not stat_path.is_file():
+        return None
+    try:
+        stat_text = stat_path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    try:
+        fields = stat_text.rsplit(")", maxsplit=1)[1].split()
+        # proc_pid_stat(5): starttime is field 22; after removing pid and comm,
+        # it is index 19 in the remaining fields.
+        return int(fields[19])
+    except (IndexError, ValueError):
+        return None
 
 
 def _resolve_scheduler_output(

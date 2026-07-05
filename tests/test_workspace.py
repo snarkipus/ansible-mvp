@@ -466,12 +466,17 @@ def test_mock_lsf_submit_wait_and_collect_use_wrapper_terminal_state(tmp_path: P
     initial_state = json.loads(state_path.read_text(encoding="utf-8"))
     assert initial_state["state"] == "RUN"
     assert initial_state["exit_code"] is None
+    assert isinstance(initial_state["pid"], int)
+    assert initial_state["process_group_id"] == initial_state["pid"]
 
     terminal_state = wait_mock_lsf_job(
         config_path=config_path, run_id="demo_006a", workspace_root=tmp_path
     )
     assert terminal_state["state"] == "DONE"
     assert terminal_state["exit_code"] == 0
+    assert terminal_state["pid"] == initial_state["pid"]
+    assert terminal_state["process_group_id"] == initial_state["process_group_id"]
+    assert terminal_state["started_at"] is not None
     assert (tmp_path / "runs/demo_006a/provenance/scheduler/terminal-state.json").is_file()
     assert (tmp_path / "runs/demo_006a/provenance/logs/run_simulation.stage.json").is_file()
 
