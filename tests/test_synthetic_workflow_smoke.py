@@ -62,6 +62,26 @@ def test_clean_synthetic_workflow_smoke_generates_manifest_reports_and_validatio
     assert execution_context["git_version"].startswith("git version")
     assert manifest["controlled_source_gate"]["status"] == "pass"
     assert manifest["scheduler"]["mode"] == "mock_lsf"
+    assert manifest["scheduler"]["job_id"] == f"mock-{run_id}"
+    assert manifest["scheduler"]["final_state"] == "DONE"
+    assert manifest["scheduler"]["exit_code"] == 0
+    assert manifest["scheduler"]["evidence"]["submission"] == (
+        f"runs/{run_id}/provenance/scheduler/submission.yaml"
+    )
+    assert manifest["scheduler"]["evidence"]["job_state"] == (
+        f"runs/{run_id}/provenance/scheduler/job-state.json"
+    )
+    assert manifest["scheduler"]["evidence"]["terminal_state"] == (
+        f"runs/{run_id}/provenance/scheduler/terminal-state.json"
+    )
+    assert manifest["scheduler"]["evidence"]["accounting"] == (
+        f"runs/{run_id}/provenance/scheduler/accounting.yaml"
+    )
+    assert manifest["scheduler"]["evidence"]["payload_stage"] == (
+        f"runs/{run_id}/provenance/logs/run_simulation.stage.json"
+    )
+    assert manifest["scheduler"]["terminal_job_state"]["state"] == "DONE"
+    assert manifest["scheduler"]["accounting"]["state"] == "DONE"
     assert manifest["raw_simulation_outputs"][0]["relative_path"] == "lists/dirC/sim-out.dat"
     assert manifest["raw_simulation_outputs"][0]["sim_area"] == "lists"
     assert manifest["raw_simulation_outputs"][0]["logical_group"] == "dirC"
@@ -80,6 +100,9 @@ def test_clean_synthetic_workflow_smoke_generates_manifest_reports_and_validatio
         assert manifest_stage["operator_visible"] == configured_stage["operator_visible"]
     assert [entry["stage"] for entry in manifest["workflow"]["operator_flow"]] == [
         stage["name"] for stage in configured_stages if stage["operator_visible"]
+    ]
+    assert "run_simulation" not in [
+        entry["stage"] for entry in manifest["workflow"]["operator_flow"]
     ]
     support_stage_names = {
         "preflight",

@@ -92,12 +92,18 @@ targets:
 
 ```text
 Preflight gate -> Prepare simulation inputs -> Submit simulation
--> Run simulation -> Extract results -> Build reports -> Validate products
+-> Wait for simulation -> Collect scheduler evidence
+-> Extract results -> Build reports -> Validate products
 ```
 
 The granular Make targets are still useful for debugging. The manifest records the
 small flow under `workflow.operator_flow` and keeps complete support, evidence,
 and finalization records under `stages`.
+
+Normal Ansible runs do not call the simulation payload directly. They cross a
+local async mock-`bsub` boundary: `submit-mock-lsf` starts a scheduler-owned local
+wrapper, `wait-mock-lsf` waits on scheduler state, and `collect-mock-lsf` records
+final accounting before extraction.
 
 Choose a fresh `run_id` for each new execution. If a stage fails, the partial
 `runs/{run_id}/` tree and `provenance/logs/` evidence are useful for inspection,
@@ -154,13 +160,20 @@ less runs/demo_001/provenance/manifest.yaml
 Important sections to check:
 
 - `workflow.operator_flow`: the short human-readable flow through operator-visible
-  stages, with display names, status, lifecycle class, and links to evidence.
+  stages, with display names, status, lifecycle class, and links to evidence. It
+  shows submit, wait, collect, extract, report, and validation phases; direct
+  `run_simulation` payload execution remains hidden from this concise view and is
+  recorded under `stages`.
 - `run.started_at`, `run.finished_at`, and `run.execution_context`: the run-level
   time range derived from stage evidence plus local user, host, platform, Python,
   and Git version context for the manifest assembly environment.
 - `repositories`: wrapper and controlled-source Git state, requested refs, resolved
   commits, branch/tag/describe values, tracked script paths, and hashes.
 - `controlled_source_gate`: preflight checks that passed before execution.
+- `scheduler`: local async mock-LSF submission, job id, final state, exit code,
+  linked evidence paths for `submission.yaml`, `job-state.json`,
+  `terminal-state.json`, `accounting.yaml`, scheduler logs, and the payload
+  `run_simulation.stage.json` evidence.
 - `inputs` and `runtime_scripts`: where materialized inputs/scripts came from and
   how they were copied into the run.
 - `stages`: complete first-class attempt evidence for every configured workflow stage,
@@ -245,6 +258,12 @@ When adding a new stage or artifact:
 - **Partial or failed run:** inspect the existing `runs/{run_id}/` evidence, then
   rerun with a new `run_id` after fixing the problem. Do not assume the MVP can
   safely resume a partially completed run.
+- **Scheduler job did not finish with `DONE`:** inspect
+  `provenance/scheduler/job-state.json`, `terminal-state.json`, `accounting.yaml`
+  if present, scheduler `stdout.log`/`stderr.log`, and
+  `provenance/logs/run_simulation.stage.json` if the payload reached execution.
+  Extraction intentionally refuses `EXIT`, `TIMEOUT`, `UNKNOWN`, missing state, or
+  stale non-terminal state.
 - **CSV validation failure:** compare the generated CSV with
   `configs/expected_shape.required_extract.yaml`.
 - **Real LSF tools are absent:** this is expected for the MVP; mock scheduler mode
@@ -256,6 +275,25 @@ adds payload-owned deterministic runtime-delay support through
 `SYNTHETIC_SIM_RUNTIME_DELAY_MIN_SECONDS` / `MAX_SECONDS` range. The wrapper
 does not add fake scheduler latency; async mock-scheduler runs should pass delay
 configuration into the controlled payload.
+
+If the controlled payload contract changes again, update the controlled-source
+template and default ref together. `make bootstrap-controlled-source` should create
+the new tag for missing demo repos, verify an existing clean compatible repo, and
+avoid rewriting older tags such as `controlled-source-demo-v0.1.0`.
+
+## Mock Scheduler Boundary and Deferred Production Work
+
+The local MVP uses mock LSF evidence only; it does not require or invoke `bsub`,
+`bjobs`, `bhist`, or `bacct`. The replacement seam for production is the trio of
+Make/Python scheduler targets:
+
+1. `submit-mock-lsf` -> future real `bsub` submission evidence.
+2. `wait-mock-lsf` -> future real polling/status evidence.
+3. `collect-mock-lsf` -> future real `bjobs`/`bhist`/`bacct` accounting evidence.
+
+The following remain deferred follow-up work: real LSF command integration,
+daemonized scheduling, multi-job scheduling/job arrays, and production-safe resume
+or attempt-history semantics.
 
 ## What Not to Change
 

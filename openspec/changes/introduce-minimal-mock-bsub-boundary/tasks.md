@@ -28,11 +28,11 @@
 
 ## 4. Manifest, Docs, and Operator Flow
 
-- [ ] 4.1 Update manifest assembly to link scheduler submission, terminal job state, accounting evidence, job id, final state, and payload execution evidence.
-- [ ] 4.2 Update `workflow.operator_flow` so it presents submit, wait, collect, extract, and report phases without showing direct simulation execution outside the scheduler boundary.
-- [ ] 4.3 Update README and handoff documentation to describe the local async mock-`bsub` boundary, evidence files, failure behavior, and real-LSF replacement seam.
-- [ ] 4.4 Document that real LSF integration, daemonized scheduling, multi-job scheduling, and production resume semantics remain deferred.
-- [ ] 4.5 Document any controlled-source ref/tag change and the expected bootstrap command behavior if the controlled payload contract changes.
+- [x] 4.1 Update manifest assembly to link scheduler submission, terminal job state, accounting evidence, job id, final state, and payload execution evidence.
+- [x] 4.2 Update `workflow.operator_flow` so it presents submit, wait, collect, extract, and report phases without showing direct simulation execution outside the scheduler boundary.
+- [x] 4.3 Update README and handoff documentation to describe the local async mock-`bsub` boundary, evidence files, failure behavior, and real-LSF replacement seam.
+- [x] 4.4 Document that real LSF integration, daemonized scheduling, multi-job scheduling, and production resume semantics remain deferred.
+- [x] 4.5 Document any controlled-source ref/tag change and the expected bootstrap command behavior if the controlled payload contract changes.
 
 ## 5. Tests and Validation
 

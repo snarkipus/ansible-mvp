@@ -28,9 +28,9 @@ Operator-facing flow:
 
 ```text
 Preflight gate
-  -> Prepare simulation inputs
   -> Submit simulation
-  -> Run simulation
+  -> Wait for simulation
+  -> Collect scheduler evidence
   -> Extract required/ad hoc results
   -> Build report products
   -> Validate products
@@ -42,7 +42,7 @@ The Makefile keeps more granular targets for debugging, and the manifest keeps c
 flowchart TD
     operator["Operator / Engineer<br/>Ubuntu or WSL shell"]
     ansible["Ansible playbook<br/>run_synthetic_workflow.yml"]
-    make["Make stage contract<br/>preflight -> prepare -> materialize -> mock LSF<br/>simulate -> extract -> reports -> inventory -> validate -> manifest"]
+    make["Make stage contract<br/>preflight -> prepare -> materialize<br/>submit -> wait -> collect -> extract<br/>reports -> inventory -> validate -> manifest"]
 
     subgraph wrapper["Wrapper repo: ansible-mvp"]
         wrapperFiles["Ansible, Makefile, configs<br/>Python provenance CLI/helpers"]
@@ -66,7 +66,7 @@ flowchart TD
 
         subgraph prov["provenance/ wrapper-owned sidecar"]
             pf["preflight.json"]
-            sched["scheduler/submission.yaml"]
+            sched["scheduler/submission.yaml<br/>job-state.json, terminal-state.json<br/>accounting.yaml, stdout/stderr logs"]
             logs["logs/*.stage.json"]
             inv["inventories/*.json"]
             vals["validations/*.json"]
@@ -85,7 +85,7 @@ flowchart TD
     tag --> preflight
     preflight --> input
     preflight --> procs
-    procs --> raw
+    procs --> sched --> raw
     raw --> extracted --> reports
     make --> sched
     make --> logs
@@ -111,7 +111,8 @@ In scope:
 - Ansible as the outer execution harness,
 - Makefile as the local stage definition,
 - Python helper utilities for inventory, hashing, validation, and manifest generation,
-- mock LSF submission metadata,
+- a local async mock-`bsub`/LSF boundary that submits, waits for, and collects
+  scheduler-owned evidence around the synthetic payload,
 - strict Git entrance gate for controlled source and scripts,
 - preservation of the canonical simulation run layout,
 - provenance-controlled derived products outside the simulation root.
@@ -120,6 +121,8 @@ Out of scope:
 
 - production deployment to target HPC,
 - real LSF integration,
+- daemonized scheduling, multi-job scheduling, job arrays, and production resume
+  semantics,
 - DVC or artifact vaulting,
 - Parquet warehouse/lakehouse design,
 - Tableau integration,
@@ -193,6 +196,8 @@ runs/{run_id}/
 - `sim-run-root/procs/`: materialized runtime invocation scripts.
 - `provenance/products/extracted/`: derived CSV outputs generated from raw simulation outputs.
 - `provenance/products/reports/`: generated XLSX/PPTX/figure artifacts.
+- `provenance/scheduler/`: local async mock-LSF submission, terminal job state,
+  accounting, and scheduler stdout/stderr evidence.
 - `provenance/logs/`: stage logs and `*.stage.json` evidence for every configured workflow stage, including support stages such as preflight, materialization, inventories, and manifest assembly; Ansible itself runs the Make contract rather than writing a separate wrapper log file.
 - `provenance/manifest.yaml`: the run-level provenance spine.
 
@@ -256,6 +261,9 @@ runs/demo_001/provenance/products/reports/briefing.pptx
 runs/demo_001/provenance/logs/
 runs/demo_001/provenance/inventories/
 runs/demo_001/provenance/scheduler/submission.yaml
+runs/demo_001/provenance/scheduler/job-state.json
+runs/demo_001/provenance/scheduler/terminal-state.json
+runs/demo_001/provenance/scheduler/accounting.yaml
 runs/demo_001/provenance/validations/required_extract.json
 runs/demo_001/provenance/validations/manifest_smoke.json
 runs/demo_001/sim-run-root/lists/
@@ -307,14 +315,20 @@ make check
 make clean
 ```
 
-The run configuration (`configs/run.synthetic.yaml`) is the source of truth for stage order. The current Ansible inventory mirrors that order until the async scheduler stage-list helper is added:
+The run configuration (`configs/run.synthetic.yaml`) is the source of truth for stage order. Ansible asks the Python helper for the configured Make target order and then runs one target per task boundary:
 
 ```text
 preflight -> prepare-workspace -> materialize-inputs -> materialize-procs
--> inventory-pre -> submit-mock-lsf -> run-simulation
+-> inventory-pre -> submit-mock-lsf -> wait-mock-lsf -> collect-mock-lsf
 -> extract-required -> extract-ad-hoc -> build-reports
 -> validate -> inventory-post -> manifest -> manifest-smoke
 ```
+
+`run-simulation` remains a Make target for focused debugging and payload stage
+evidence, but normal Ansible runs execute the payload only through the scheduler
+boundary. The concise manifest operator flow therefore shows submit, wait,
+collect, extract, report, and validate phases rather than direct simulation
+execution outside mock LSF.
 
 Note that `inventory-pre` records pre-run input/script evidence before mock LSF submission, and `inventory-post` records output evidence after validation. For focused debugging of an existing run workspace, keep the same `RUN_ID`, `CONTROLLED_SOURCE_REPO`, and `CONTROLLED_SOURCE_REF` values, run `make preflight RUN_ROOT_POLICY=reuse`, and do not bypass the preflight gate.
 
@@ -384,7 +398,8 @@ For large production raw outputs, the future policy may record size and modifica
 - concise `workflow.operator_flow` summary,
 - input inventory,
 - materialization mode for each input,
-- mock scheduler metadata,
+- mock scheduler submission, job id, terminal state, accounting links, scheduler
+  logs, and payload stage evidence,
 - complete stage commands/status/timestamps/log paths,
 - raw simulation output inventory,
 - derived product inventory,
@@ -394,7 +409,26 @@ For large production raw outputs, the future policy may record size and modifica
 
 ## LSF Integration Placeholder
 
-The synthetic MVP emulates LSF behavior only through `make submit-mock-lsf`, which writes `provenance/scheduler/submission.yaml`. The manifest reserves space for future production metadata such as:
+The synthetic MVP emulates the production scheduler seam with three local async
+targets: `make submit-mock-lsf`, `make wait-mock-lsf`, and
+`make collect-mock-lsf`. Submit launches a scheduler-owned local wrapper process
+and returns before terminal payload completion; wait polls wrapper-written state;
+collect records final accounting. Evidence is written under
+`provenance/scheduler/`:
+
+- `submission.yaml`: mock submit metadata, job id, scheduler mode, evidence paths,
+  and real-LSF tool availability observations.
+- `job-state.json`: current/final job state used by wait and extraction gating.
+- `terminal-state.json`: scheduler-owned terminal state with final `DONE`, `EXIT`,
+  `TIMEOUT`, or `UNKNOWN`, timestamps, exit code, and payload evidence path.
+- `accounting.yaml`: final accounting summary linking job state to payload stage
+  evidence and future real-LSF equivalents.
+- `stdout.log` and `stderr.log`: scheduler wrapper streams.
+
+Extraction is allowed only after terminal scheduler `DONE`; failed, timed out, or
+unknown jobs leave inspectable evidence and stop later stages instead of faking
+success. A future production adapter can replace the local emulator at this seam
+with real LSF submission, polling, history, and accounting evidence such as:
 
 - `bsub` command,
 - LSF job ID,
@@ -406,6 +440,9 @@ The synthetic MVP emulates LSF behavior only through `make submit-mock-lsf`, whi
 - `bhist` output,
 - `bacct` output,
 - final scheduler status.
+
+Real LSF integration, daemonized scheduling, multi-job scheduling/job arrays, and
+production-grade resume/attempt-history semantics remain explicitly deferred.
 
 ## Acceptance Criteria
 

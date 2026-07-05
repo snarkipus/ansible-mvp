@@ -199,6 +199,7 @@ def assemble_run_manifest(
     validations_root = provenance_root / "validations"
 
     scheduler_path = run_root / _required_string(scheduler_config, "metadata_path")
+    scheduler_root = provenance_root / "scheduler"
     preflight_path = provenance_root / "preflight.json"
 
     wrapper_repo = _repository_manifest_record(
@@ -241,7 +242,11 @@ def assemble_run_manifest(
             "canonical_raw_output": layout_config.get("canonical_raw_output"),
         },
         controlled_source_gate=_read_json_mapping(preflight_path),
-        scheduler=_read_yaml_mapping(scheduler_path),
+        scheduler=_scheduler_manifest_record(
+            root=root,
+            scheduler_path=scheduler_path,
+            scheduler_root=scheduler_root,
+        ),
         inputs=_read_json_list(inventories_root / "pre_run_inputs.json"),
         runtime_scripts=_read_json_list(inventories_root / "pre_run_controlled_scripts.json"),
         stages=stages,
@@ -403,6 +408,65 @@ def _operator_flow(stages: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
     return flow
 
 
+def _scheduler_manifest_record(
+    *, root: Path, scheduler_path: Path, scheduler_root: Path
+) -> dict[str, Any]:
+    submission = _read_yaml_mapping(scheduler_path)
+    job_state_path = scheduler_root / "job-state.json"
+    terminal_state_path = scheduler_root / "terminal-state.json"
+    accounting_path = scheduler_root / "accounting.yaml"
+    stdout_log = scheduler_root / "stdout.log"
+    stderr_log = scheduler_root / "stderr.log"
+
+    job_state = _read_optional_json_mapping(job_state_path)
+    terminal_state = _read_optional_json_mapping(terminal_state_path)
+    accounting = _read_optional_yaml_mapping(accounting_path)
+    final_record = accounting or terminal_state or job_state or {}
+
+    payload_evidence = _first_string(
+        final_record.get("payload_stage_evidence"),
+        job_state.get("payload_stage_evidence") if job_state else None,
+        submission.get("payload_stage_evidence"),
+    )
+    job_id = _first_string(
+        final_record.get("job_id"),
+        job_state.get("job_id") if job_state else None,
+        _nested_string(submission, "submission", "job_id"),
+    )
+
+    record = dict(submission)
+    record.update(
+        {
+            "job_id": job_id,
+            "final_state": _first_string(
+                final_record.get("state"), job_state.get("state") if job_state else None
+            ),
+            "exit_code": final_record.get("exit_code"),
+            "evidence": {
+                "submission": _relative_path(root, scheduler_path),
+                "job_state": _relative_path(root, job_state_path)
+                if job_state_path.is_file()
+                else None,
+                "terminal_state": _relative_path(root, terminal_state_path)
+                if terminal_state_path.is_file()
+                else None,
+                "accounting": _relative_path(root, accounting_path)
+                if accounting_path.is_file()
+                else None,
+                "payload_stage": payload_evidence,
+                "stdout_log": _relative_path(root, stdout_log) if stdout_log.is_file() else None,
+                "stderr_log": _relative_path(root, stderr_log) if stderr_log.is_file() else None,
+            },
+            "terminal_job_state": terminal_state,
+            "accounting": accounting,
+            "future_real_lsf_equivalent": (accounting or {}).get(
+                "future_real_lsf_equivalent", ["bsub", "bjobs", "bhist", "bacct"]
+            ),
+        }
+    )
+    return record
+
+
 def _missing_for_key_path(manifest: Mapping[str, object], key_path: str) -> list[str]:
     current_values: list[object] = [manifest]
     display_paths: list[str] = [""]
@@ -461,6 +525,12 @@ def _read_json_mapping(path: Path) -> dict[str, Any]:
     return loaded
 
 
+def _read_optional_json_mapping(path: Path) -> dict[str, Any] | None:
+    if not path.is_file():
+        return None
+    return _read_json_mapping(path)
+
+
 def _read_json(path: Path) -> Any:
     with path.open(encoding="utf-8") as file_obj:
         return json.load(file_obj)
@@ -493,6 +563,31 @@ def _format_layout_path(layout: Mapping[str, object], key: str, run_id: str) -> 
 
 def _read_yaml_mapping(path: Path) -> dict[str, Any]:
     return read_yaml_mapping(path)
+
+
+def _read_optional_yaml_mapping(path: Path) -> dict[str, Any] | None:
+    if not path.is_file():
+        return None
+    return _read_yaml_mapping(path)
+
+
+def _relative_path(root: Path, path: Path) -> str:
+    return path.relative_to(root).as_posix()
+
+
+def _first_string(*values: object) -> str | None:
+    for value in values:
+        if isinstance(value, str) and value:
+            return value
+    return None
+
+
+def _nested_string(source: Mapping[str, Any], key: str, nested_key: str) -> str | None:
+    nested = source.get(key)
+    if not isinstance(nested, Mapping):
+        return None
+    value = nested.get(nested_key)
+    return value if isinstance(value, str) and value else None
 
 
 def _required_mapping(source: Mapping[str, object], key: str) -> dict[str, Any]:

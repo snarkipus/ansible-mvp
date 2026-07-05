@@ -572,12 +572,53 @@ def test_cli_assembles_run_manifest_from_workflow_evidence(tmp_path: Path, capsy
             },
         },
     )
+    _write_json(
+        scheduler_root / "job-state.json",
+        {
+            "run_id": "demo_001",
+            "scheduler": "mock_lsf",
+            "job_id": "mock-demo_001",
+            "state": "DONE",
+            "exit_code": 0,
+            "payload_stage_evidence": "runs/demo_001/provenance/logs/run_simulation.stage.json",
+        },
+    )
+    _write_json(
+        scheduler_root / "terminal-state.json",
+        {
+            "run_id": "demo_001",
+            "scheduler": "mock_lsf",
+            "job_id": "mock-demo_001",
+            "state": "DONE",
+            "exit_code": 0,
+            "payload_stage_evidence": "runs/demo_001/provenance/logs/run_simulation.stage.json",
+        },
+    )
+    (scheduler_root / "accounting.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "run_id": "demo_001",
+                "scheduler": "mock_lsf",
+                "job_id": "mock-demo_001",
+                "state": "DONE",
+                "exit_code": 0,
+                "job_state_path": "runs/demo_001/provenance/scheduler/job-state.json",
+                "payload_stage_evidence": "runs/demo_001/provenance/logs/run_simulation.stage.json",
+                "future_real_lsf_equivalent": ["bjobs", "bhist", "bacct"],
+            }
+        ),
+        encoding="utf-8",
+    )
     (scheduler_root / "submission.yaml").write_text(
         yaml.safe_dump(
             {
                 "mode": "mock_lsf",
                 "scheduler": "mock_lsf",
                 "metadata_path": "runs/demo_001/provenance/scheduler/submission.yaml",
+                "submission": {"job_id": "mock-demo_001", "state": "RUN"},
+                "job_state_path": "runs/demo_001/provenance/scheduler/job-state.json",
+                "terminal_state_path": "runs/demo_001/provenance/scheduler/terminal-state.json",
+                "accounting_path": "runs/demo_001/provenance/scheduler/accounting.yaml",
             }
         ),
         encoding="utf-8",
@@ -618,6 +659,19 @@ def test_cli_assembles_run_manifest_from_workflow_evidence(tmp_path: Path, capsy
     assert manifest["repositories"][1]["scripts"][0]["hash_status"] == "hashed"
     assert manifest["controlled_source_gate"]["status"] == "pass"
     assert manifest["scheduler"]["mode"] == "mock_lsf"
+    assert manifest["scheduler"]["job_id"] == "mock-demo_001"
+    assert manifest["scheduler"]["final_state"] == "DONE"
+    assert manifest["scheduler"]["evidence"] == {
+        "submission": "runs/demo_001/provenance/scheduler/submission.yaml",
+        "job_state": "runs/demo_001/provenance/scheduler/job-state.json",
+        "terminal_state": "runs/demo_001/provenance/scheduler/terminal-state.json",
+        "accounting": "runs/demo_001/provenance/scheduler/accounting.yaml",
+        "payload_stage": "runs/demo_001/provenance/logs/run_simulation.stage.json",
+        "stdout_log": None,
+        "stderr_log": None,
+    }
+    assert manifest["scheduler"]["terminal_job_state"]["state"] == "DONE"
+    assert manifest["scheduler"]["accounting"]["job_state_path"].endswith("job-state.json")
     assert manifest["inputs"][0]["logical_group"] == "dirC"
     assert manifest["runtime_scripts"][0]["role"] == "runtime_script"
     assert manifest["stages"][0]["status"] == "pass"
