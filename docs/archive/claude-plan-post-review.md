@@ -27,7 +27,7 @@
  4. The manifest has no execution context (user, hostname, platform, tool versions) and no run-level start/finish timestamps — only
  per-stage ones — despite README's manifest expectations listing "timestamps".
  5. Small items: schema_version in configs is read by nobody; inventory_pre is lifecycle-classed finalization though it runs
- mid-flow (repo's own docs/core-workflow-refactoring-recommendations.md suggests an evidence lane); CLI stage-evidence flag naming
+  mid-flow (repo's own docs/archive/core-workflow-refactoring-recommendations.md suggests an evidence lane); CLI stage-evidence flag naming
  is inconsistent (--output vs --stage-output); basedpyright excludes tests/; absolute host paths are embedded in manifest evidence.
 
  Part A — Maintenance beads (no OpenSpec change)

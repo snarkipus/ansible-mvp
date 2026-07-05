@@ -1,6 +1,6 @@
 ## Authority and Source-of-Truth Status
 
-This design is the authoritative, comprehensive source of truth for the `scaffold-runnable-provenance-mvp` OpenSpec change. It incorporates the durable requirements from `docs/provenance_first_mvp_concept_spec.md`, the accepted OpenSpec proposal and tasks, and the implementation choices present in the runnable MVP scaffold.
+This design is the authoritative, comprehensive source of truth for the `scaffold-runnable-provenance-mvp` OpenSpec change. It incorporates the durable requirements from `docs/archive/provenance_first_mvp_concept_spec.md`, the accepted OpenSpec proposal and tasks, and the implementation choices present in the runnable MVP scaffold.
 
 The original concept spec remains useful background and history. It explains the broader production motivation, possible future RHEL/LSF deployment shape, and follow-on decision areas. When this OpenSpec change and the concept spec differ, this design takes precedence for the implemented local MVP because it reflects the final scaffold, current command names, evidence filenames, and scoped deviations.
 

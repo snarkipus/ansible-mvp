@@ -147,7 +147,7 @@ bd automatically syncs via Dolt:
 - ❌ Do NOT use external issue trackers
 - ❌ Do NOT duplicate tracking systems
 
-For more details, see README.md and docs/QUICKSTART.md.
+For repo-specific usage details, see README.md and docs/how_to_use_this_mvp.md.
 
 ## Session Completion
 
