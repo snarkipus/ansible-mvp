@@ -254,22 +254,30 @@ def test_extract_required_smoke_rejects_non_done_scheduler_state(tmp_path: Path)
     assert "'RUN'" in _combined_output(result)
 
 
+def test_copy_git_worktree_respects_gitignore(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    destination = tmp_path / "destination"
+    source.mkdir()
+    _run(["git", "init"], cwd=source)
+    (source / ".gitignore").write_text("ignored-link\n", encoding="utf-8")
+    (source / "tracked.txt").write_text("tracked\n", encoding="utf-8")
+    (source / "untracked.txt").write_text("untracked\n", encoding="utf-8")
+    (source / "ignored-link").symlink_to("missing-target")
+    _run(["git", "add", ".gitignore", "tracked.txt"], cwd=source)
+
+    _copy_git_worktree(source, destination)
+
+    assert (destination / ".gitignore").is_file()
+    assert (destination / "tracked.txt").read_text(encoding="utf-8") == "tracked\n"
+    assert (destination / "untracked.txt").read_text(encoding="utf-8") == "untracked\n"
+    assert not (destination / "ignored-link").exists()
+    assert not (destination / "ignored-link").is_symlink()
+    assert not (destination / ".git").exists()
+
+
 def _prepare_wrapper_checkout(tmp_path: Path) -> Path:
     wrapper = tmp_path / "ansible-mvp"
-    shutil.copytree(
-        ROOT,
-        wrapper,
-        ignore=shutil.ignore_patterns(
-            ".git",
-            ".beads",
-            ".basedpyright_cache",
-            ".pytest_cache",
-            ".ruff_cache",
-            ".venv",
-            "__pycache__",
-            "runs",
-        ),
-    )
+    _copy_git_worktree(ROOT, wrapper, excluded_top_level={".beads", "runs"})
     (wrapper / "runs").mkdir()
     (wrapper / "runs" / ".gitkeep").write_text("", encoding="utf-8")
     _run(["git", "init"], cwd=wrapper)
@@ -278,6 +286,31 @@ def _prepare_wrapper_checkout(tmp_path: Path) -> Path:
     _run(["git", "add", "."], cwd=wrapper)
     _run(["git", "commit", "-m", "smoke wrapper baseline"], cwd=wrapper)
     return wrapper
+
+
+def _copy_git_worktree(
+    source: Path,
+    destination: Path,
+    *,
+    excluded_top_level: set[str] | None = None,
+) -> None:
+    included = _run(
+        ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+        cwd=source,
+    ).stdout.split("\0")
+    excluded = excluded_top_level or set()
+    destination.mkdir()
+
+    for relative_path in included:
+        if not relative_path or Path(relative_path).parts[0] in excluded:
+            continue
+        source_path = source / relative_path
+        destination_path = destination / relative_path
+        destination_path.parent.mkdir(parents=True, exist_ok=True)
+        if source_path.is_symlink():
+            destination_path.symlink_to(os.readlink(source_path))
+        else:
+            shutil.copy2(source_path, destination_path)
 
 
 def _bootstrap_controlled_source(wrapper: Path) -> Path:
