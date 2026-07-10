@@ -1,6 +1,6 @@
 ## 1. Execution Tracking and Baseline
 
-- [ ] 1.1 Create one beads epic for this accepted change and child beads for path safety, controlled-source binding, scheduler receipt, failed-attempt evidence, product integrity, manifest integrity, and contract/documentation reconciliation, preserving task-to-bead coverage.
+- [x] 1.1 Create one beads epic for this accepted change and child beads for path safety, controlled-source binding, scheduler receipt, failed-attempt evidence, product integrity, manifest integrity, and contract/documentation reconciliation, preserving task-to-bead coverage.
 - [ ] 1.2 Capture a clean baseline with `make check` and the documented synthetic Ansible run using a fresh run ID.
 
 ## 2. Identifier, Path, and Configuration Safety
