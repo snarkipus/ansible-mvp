@@ -54,6 +54,7 @@ def submit_mock_lsf_job(
     initial_state = {
         "run_id": run_id,
         "scheduler": "mock_lsf",
+        "mode": context["scheduler"]["mode"],
         "job_id": context["job_id"],
         "receipt_id": receipt_id,
         "state": "RUN",
@@ -113,6 +114,9 @@ def submit_mock_lsf_job(
         "real_lsf_required": False,
         "real_lsf_tools": _tool_status(tool_resolver),
         "submission": {
+            "run_id": run_id,
+            "scheduler": "mock_lsf",
+            "mode": context["scheduler"]["mode"],
             "job_id": context["job_id"],
             "receipt_id": receipt_id,
             "queue": "mock-local",
@@ -216,6 +220,7 @@ def collect_mock_lsf_accounting(
     accounting = {
         "run_id": run_id,
         "scheduler": "mock_lsf",
+        "mode": context["scheduler"]["mode"],
         "job_id": context["job_id"],
         "receipt_id": state.get("receipt_id"),
         "state": state.get("state"),
@@ -255,11 +260,14 @@ def run_mock_lsf_wrapper(
     try:
         inventories_root = context["provenance_root"] / "inventories"
         verify_materialization_evidence(
-            inventories_root / "materialized_inputs.json", workspace_root=context["root"]
+            inventories_root / "materialized_inputs.json",
+            workspace_root=context["root"],
+            controlled_source_repo=controlled_source_repo,
         )
         verify_materialization_evidence(
             inventories_root / "materialized_runtime_scripts.json",
             workspace_root=context["root"],
+            controlled_source_repo=controlled_source_repo,
         )
         result = run_synthetic_simulation(
             config_path=config_path,
@@ -272,6 +280,8 @@ def run_mock_lsf_wrapper(
         result_payload["receipt_id"] = state.get("receipt_id")
         result_payload["run_id"] = run_id
         result_payload["job_id"] = context["job_id"]
+        result_payload["scheduler"] = "mock_lsf"
+        result_payload["mode"] = context["scheduler"]["mode"]
         result_payload["evidence_path"] = context["payload_stage_evidence"]
         _write_json(payload_evidence_path, result_payload)
         return_code = result.return_code
@@ -355,6 +365,101 @@ def validate_scheduler_receipt(
         component_job_id = component.get("job_id")
         if component_job_id != expected_job_id:
             errors.append(f"{name} job_id does not match {expected_job_id!r}")
+        if component.get("scheduler") != "mock_lsf":
+            errors.append(f"{name} scheduler must be 'mock_lsf'")
+        if component.get("mode") != context["scheduler"]["mode"]:
+            errors.append(
+                f"{name} mode does not match configured scheduler mode "
+                f"{context['scheduler']['mode']!r}"
+            )
+
+    nested_submission = submission.get("submission")
+    if not isinstance(nested_submission, dict):
+        errors.append("submission.submission must be a mapping")
+        nested_submission = {}
+    for field, expected in (
+        ("run_id", run_id),
+        ("scheduler", "mock_lsf"),
+        ("mode", context["scheduler"]["mode"]),
+        ("job_id", expected_job_id),
+        ("receipt_id", receipt_id),
+    ):
+        if nested_submission.get(field) != expected:
+            errors.append(f"submission.submission.{field} does not match top-level identity")
+
+    scheduler_config = context["scheduler"]
+    payload_stage = scheduler_config.get("payload_stage")
+    payload_command = scheduler_config.get("payload_command")
+    configured_stages = context["config"].get("stages")
+    configured_payload = (
+        next(
+            (
+                stage
+                for stage in configured_stages
+                if isinstance(stage, dict) and stage.get("name") == payload_stage
+            ),
+            None,
+        )
+        if isinstance(configured_stages, list)
+        else None
+    )
+    if payload.get("name") != payload_stage:
+        errors.append("payload name does not match configured payload_stage")
+    if not isinstance(configured_payload, dict):
+        errors.append("configured payload_stage declaration is missing")
+    else:
+        if configured_payload.get("command") != payload_command:
+            errors.append(
+                "configured payload stage command does not match scheduler payload_command"
+            )
+        if configured_payload.get("command_kind") != scheduler_config.get("payload_command_kind"):
+            errors.append("configured payload stage command_kind does not match scheduler policy")
+    if payload.get("command") != payload_command:
+        errors.append("payload command does not match configured controlled payload command")
+    if nested_submission.get("payload_command") != payload_command:
+        errors.append(
+            "submission.submission.payload_command does not match configured payload command"
+        )
+
+    expected_links = {
+        "submission.metadata_path": (
+            submission.get("metadata_path"),
+            component_paths["submission"],
+        ),
+        "submission.job_state_path": (
+            submission.get("job_state_path"),
+            component_paths["job_state"],
+        ),
+        "submission.terminal_state_path": (
+            submission.get("terminal_state_path"),
+            component_paths["terminal_state"],
+        ),
+        "submission.accounting_path": (
+            submission.get("accounting_path"),
+            component_paths["accounting"],
+        ),
+        "job_state.payload_stage_evidence": (
+            state.get("payload_stage_evidence"),
+            component_paths["payload"],
+        ),
+        "terminal_state.payload_stage_evidence": (
+            terminal.get("payload_stage_evidence"),
+            component_paths["payload"],
+        ),
+        "accounting.job_state_path": (
+            accounting.get("job_state_path"),
+            component_paths["job_state"],
+        ),
+        "accounting.payload_stage_evidence": (
+            accounting.get("payload_stage_evidence"),
+            component_paths["payload"],
+        ),
+        "payload.evidence_path": (payload.get("evidence_path"), component_paths["payload"]),
+    }
+    for name, (actual, path) in expected_links.items():
+        expected = _relative(context["root"], path)
+        if actual != expected:
+            errors.append(f"{name} must link to {expected!r}, got {actual!r}")
 
     if terminal.get("state") != "DONE" or terminal.get("exit_code") != 0:
         errors.append("terminal state must be DONE with zero exit_code")
@@ -364,15 +469,43 @@ def validate_scheduler_receipt(
         errors.append("accounting must record DONE with zero exit_code")
     if payload.get("status") != "pass" or payload.get("return_code") != 0:
         errors.append("payload stage evidence must pass with zero return_code")
-    if accounting.get("payload_stage_evidence") != context["payload_stage_evidence"]:
-        errors.append("accounting payload-stage linkage is inconsistent")
-
-    timestamp_values = [
-        ("submitted_at", state.get("submitted_at")),
-        ("payload_started_at", payload.get("started_at")),
-        ("payload_finished_at", payload.get("finished_at")),
-        ("accounted_at", accounting.get("accounted_at")),
+    timestamp_groups = [
+        (
+            "submitted_at",
+            [
+                submission.get("submission", {}).get("submitted_at_utc")
+                if isinstance(submission.get("submission"), dict)
+                else None,
+                state.get("submitted_at"),
+                terminal.get("submitted_at"),
+                accounting.get("submitted_at"),
+            ],
+        ),
+        (
+            "started_at",
+            [
+                state.get("started_at"),
+                terminal.get("started_at"),
+                accounting.get("started_at"),
+                payload.get("started_at"),
+            ],
+        ),
+        (
+            "finished_at",
+            [
+                state.get("finished_at"),
+                terminal.get("finished_at"),
+                accounting.get("finished_at"),
+                payload.get("finished_at"),
+            ],
+        ),
+        ("accounted_at", [accounting.get("accounted_at")]),
     ]
+    timestamp_values: list[tuple[str, object]] = []
+    for name, values in timestamp_groups:
+        timestamp_values.append((name, values[0]))
+        if any(value != values[0] for value in values[1:]):
+            errors.append(f"duplicated {name} values do not agree: {values!r}")
     parsed_timestamps: list[datetime] = []
     for name, value in timestamp_values:
         parsed = _parse_timestamp(value)
@@ -394,19 +527,20 @@ def validate_scheduler_receipt(
     raw_path = context["sim_run_root"] / raw_relative
     payload_outputs_value = payload.get("outputs")
     payload_outputs = payload_outputs_value if isinstance(payload_outputs_value, list) else []
-    output_record = next(
-        (
-            item
-            for item in payload_outputs
-            if isinstance(item, dict) and item.get("relative_path") == raw_display_path
-        ),
-        None,
-    )
-    if output_record is None:
-        errors.append(f"payload output evidence is missing {raw_display_path}")
+    output_records = [
+        item
+        for item in payload_outputs
+        if isinstance(item, dict) and item.get("relative_path") == raw_display_path
+    ]
+    output_record = output_records[0] if len(output_records) == 1 else None
+    if len(output_records) != 1:
+        errors.append(
+            f"payload output evidence must contain {raw_display_path} exactly once; "
+            f"found {len(output_records)} rows"
+        )
     elif not raw_path.is_file():
         errors.append(f"raw output is missing: {raw_display_path}")
-    elif output_record.get("sha256") != sha256_file(raw_path):
+    elif output_record is not None and output_record.get("sha256") != sha256_file(raw_path):
         errors.append(f"raw output hash does not match payload evidence: {raw_display_path}")
 
     return _scheduler_receipt_result(context, components, errors)
@@ -597,7 +731,8 @@ def _parse_timestamp(value: object) -> datetime | None:
     if not isinstance(value, str):
         return None
     try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return parsed if parsed.utcoffset() is not None else None
     except ValueError:
         return None
 
@@ -610,6 +745,7 @@ def _scheduler_receipt_result(
     state = components.get("job_state", {})
     return {
         "status": "fail" if errors else "pass",
+        "validated_at": _format_timestamp(_utc_now()),
         "run_id": context["run_root"].name,
         "job_id": context["job_id"],
         "receipt_id": state.get("receipt_id"),
@@ -671,7 +807,10 @@ def _read_optional_json_mapping(path: Path) -> dict[str, Any] | None:
 def _read_yaml_mapping(path: Path) -> dict[str, Any]:
     if not path.is_file():
         raise ValueError(f"YAML evidence does not exist: {path}")
-    loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
+    try:
+        loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, yaml.YAMLError) as exc:
+        raise ValueError(f"YAML evidence is unreadable or malformed: {path}: {exc}") from exc
     if not isinstance(loaded, dict):
         raise ValueError(f"YAML evidence must be a mapping: {path}")
     return loaded

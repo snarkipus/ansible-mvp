@@ -57,16 +57,8 @@
 
   tasks:
     - name: Run configured workflow stage through the Make contract
-      ansible.builtin.command:
-        argv:
-          - "{{ make_executable }}"
-          - "{{ item }}"
-          - "RUN_ID={{ workflow_run_id }}"
-          - "CONTROLLED_SOURCE_REPO={{ workflow_controlled_source_repo }}"
-          - "CONTROLLED_SOURCE_REF={{ workflow_controlled_source_ref }}"
-      args:
-        chdir: "{{ provenance_wrapper_repo }}"
-      changed_when: true
+      ansible.builtin.include_tasks: ../tasks/run_workflow_stage.yml
       loop: "{{ workflow_stage_targets }}"
       loop_control:
-        label: "{{ item }}"
+        loop_var: workflow_stage_target
+        label: "{{ workflow_stage_target }}"

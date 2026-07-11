@@ -31,8 +31,12 @@ def test_preflight_passes_for_clean_controlled_repositories(tmp_path: Path) -> N
     assert all(record["blob_oid"] for record in result.wrapper_factory_definition)
     assert all(len(record["sha256"]) == 64 for record in result.wrapper_factory_definition)
     assert {artifact["role"] for artifact in result.controlled_artifacts} == {
-        "controlled_script",
+        "runtime_script",
         "input",
+    }
+    assert {artifact["source_category"] for artifact in result.controlled_artifacts} == {
+        "controlled_script",
+        "controlled_input",
     }
     assert all(artifact["selected_commit"] for artifact in result.controlled_artifacts)
     assert result.stages[0]["approved_command_path"] == "Makefile"

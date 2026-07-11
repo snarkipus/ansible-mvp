@@ -130,7 +130,7 @@ def run_preflight(
         config, controlled_repo_root, controlled_state.is_git_worktree, failures
     )
     controlled_artifacts = _validate_selected_commit_artifacts(
-        config, controlled_repo_root, resolved_ref, failures
+        config, controlled_repo_root, resolved_ref, run_id, failures
     )
     stages = _validate_stages(config, script_identities, failures)
     _validate_scheduler_payload(config, failures)
@@ -143,6 +143,9 @@ def run_preflight(
         wrapper_repo={
             "path": wrapper_repo_root.as_posix(),
             "head_commit": wrapper_state.head_commit,
+            "branch": wrapper_state.branch,
+            "describe": wrapper_state.describe,
+            "is_clean": wrapper_state.is_clean,
             "clean_policy": wrapper_config.get("clean_policy", "configured_paths_only"),
             "controlled_paths": wrapper_controlled_paths,
         },
@@ -152,6 +155,8 @@ def run_preflight(
             "ref": controlled_source_ref,
             "resolved_commit": resolved_ref,
             "head_commit": controlled_state.head_commit,
+            "branch": controlled_state.branch,
+            "describe": controlled_state.describe,
             "is_clean": controlled_state.is_clean,
         },
         controlled_scripts=controlled_scripts,
@@ -237,30 +242,69 @@ def _validate_selected_commit_artifacts(
     config: dict[str, Any],
     controlled_repo_root: Path,
     selected_commit: str | None,
+    run_id: str,
     failures: list[str],
 ) -> list[dict[str, Any]]:
     if selected_commit is None:
         return []
 
-    declarations: list[tuple[str, str, str | None]] = []
+    run_root = Path(
+        _non_empty_string(
+            _mapping(config.get("layout"), "layout").get("run_root"), "run_root"
+        ).replace("{run_id}", run_id)
+    )
+    declarations: list[dict[str, Any]] = []
     scripts = _mapping(config.get("controlled_scripts"), "controlled_scripts")
     for name, raw_script in scripts.items():
         script = _mapping(raw_script, f"controlled_scripts.{name}")
         relative_path = script.get("relative_path")
-        if isinstance(relative_path, str) and relative_path:
-            declarations.append((relative_path, "controlled_script", str(name)))
+        materialized_path = script.get("materialized_path")
+        if (
+            isinstance(relative_path, str)
+            and relative_path
+            and isinstance(materialized_path, str)
+            and materialized_path
+        ):
+            role = "runtime_script" if name == "run_script" else "controlled_code"
+            declarations.append(
+                {
+                    "relative_path": relative_path,
+                    "destination_path": (run_root / materialized_path).as_posix(),
+                    "role": role,
+                    "logical_group": str(name),
+                    "sim_area": "procs" if role == "runtime_script" else None,
+                    "materialization_mode": script.get("materialization_mode"),
+                    "source_category": "controlled_script",
+                    "destination_category": role,
+                }
+            )
 
     materialization = _mapping(config.get("materialization"), "materialization")
     inputs = _mapping(materialization.get("inputs"), "materialization.inputs")
     source_root = Path(_non_empty_string(inputs.get("source_root"), "source_root"))
+    destination_root = Path(_non_empty_string(inputs.get("destination_root"), "destination_root"))
     for group in _string_list(
         inputs.get("logical_groups"), "materialization.inputs.logical_groups"
     ):
         for filename in _string_list(inputs.get("files"), "materialization.inputs.files"):
-            declarations.append(((source_root / group / filename).as_posix(), "input", group))
+            declarations.append(
+                {
+                    "relative_path": (source_root / group / filename).as_posix(),
+                    "destination_path": (run_root / destination_root / group / filename).as_posix(),
+                    "role": "input",
+                    "logical_group": group,
+                    "sim_area": "input",
+                    "materialization_mode": inputs.get("mode"),
+                    "source_category": "controlled_input",
+                    "destination_category": "simulation_input",
+                }
+            )
 
     artifacts: list[dict[str, Any]] = []
-    for relative_path, role, logical_group in declarations:
+    for declaration in declarations:
+        relative_path = str(declaration["relative_path"])
+        destination_path = str(declaration["destination_path"])
+        role = str(declaration["role"])
         try:
             identity = selected_tree_artifact_identity(
                 controlled_repo_root, selected_commit, relative_path
@@ -269,7 +313,14 @@ def _validate_selected_commit_artifacts(
             failures.append(f"controlled {role} failed selected-commit checks: {exc}")
             continue
         payload: dict[str, Any] = identity.to_dict()
-        payload.update({"role": role, "logical_group": logical_group})
+        payload.update(
+            {
+                "destination_path": destination_path,
+                "destination_file_mode": "0555" if identity.executable else "0444",
+                "role": role,
+                **declaration,
+            }
+        )
         artifacts.append(payload)
     return artifacts
 

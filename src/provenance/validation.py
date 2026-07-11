@@ -8,6 +8,8 @@ validation evidence without re-reading products.
 from __future__ import annotations
 
 import csv
+import hashlib
+import io
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -75,6 +77,7 @@ class CSVValidationEvidence:
     status: ValidationStatus
     checks: tuple[ValidationCheck, ...]
     size_bytes: int | None = None
+    sha256: str | None = None
     total_rows: int | None = None
     data_rows: int | None = None
     header: tuple[str, ...] | None = None
@@ -93,6 +96,7 @@ class CSVValidationEvidence:
             "path": self.path,
             "status": self.status.value,
             "size_bytes": self.size_bytes,
+            "sha256": self.sha256,
             "total_rows": self.total_rows,
             "data_rows": self.data_rows,
             "header": list(self.header) if self.header is not None else None,
@@ -139,7 +143,9 @@ def validate_csv_product(
     if not is_file:
         return _evidence(record_path, checks)
 
-    size_bytes = product.stat().st_size
+    product_bytes = product.read_bytes()
+    size_bytes = len(product_bytes)
+    sha256 = hashlib.sha256(product_bytes).hexdigest()
     checks.append(
         _check(
             "non_empty",
@@ -150,7 +156,7 @@ def validate_csv_product(
         )
     )
 
-    rows = _read_csv_rows(product)
+    rows = _read_csv_rows(product_bytes)
     total_rows = len(rows)
     header = tuple(rows[0]) if rows else None
     data_rows = max(total_rows - 1, 0) if header is not None else 0
@@ -258,6 +264,7 @@ def validate_csv_product(
         record_path,
         checks,
         size_bytes=size_bytes,
+        sha256=sha256,
         total_rows=total_rows,
         data_rows=data_rows,
         header=header,
@@ -265,9 +272,8 @@ def validate_csv_product(
     )
 
 
-def _read_csv_rows(path: Path) -> list[list[str]]:
-    with path.open(newline="", encoding="utf-8") as file_obj:
-        return list(csv.reader(file_obj))
+def _read_csv_rows(product_bytes: bytes) -> list[list[str]]:
+    return list(csv.reader(io.StringIO(product_bytes.decode("utf-8"), newline="")))
 
 
 def _is_integer(value: str) -> bool:
@@ -300,6 +306,7 @@ def _evidence(
     checks: list[ValidationCheck],
     *,
     size_bytes: int | None = None,
+    sha256: str | None = None,
     total_rows: int | None = None,
     data_rows: int | None = None,
     header: tuple[str, ...] | None = None,
@@ -313,6 +320,7 @@ def _evidence(
         status=status,
         checks=tuple(checks),
         size_bytes=size_bytes,
+        sha256=sha256,
         total_rows=total_rows,
         data_rows=data_rows,
         header=header,

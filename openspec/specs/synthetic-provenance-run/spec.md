@@ -199,7 +199,7 @@ The system SHALL use Ansible for environment admission, per-stage Make target se
 - **THEN** scheduler polling, timeout handling, and scheduler evidence writing are performed by Python behind the `wait-mock-lsf` Make target rather than by Ansible retry logic
 
 ### Requirement: Downstream extraction waits for scheduler success
-The system SHALL prevent downstream extraction unless submission, terminal state, normalized job state, accounting, payload execution evidence, and produced raw output form one coherent successful scheduler receipt.
+The system SHALL prevent downstream extraction unless submission, terminal state, normalized job state, accounting, payload execution evidence, and produced raw output pass a fresh complete coherence check immediately before each extraction.
 
 #### Scenario: Extraction follows coherent scheduler completion
 - **WHEN** all scheduler records identify one submission receipt, the expected run and job, monotonic lifecycle timestamps, terminal state `DONE`, zero exit status, successful payload evidence, linked accounting, and matching raw-output identity
@@ -211,7 +211,7 @@ The system SHALL prevent downstream extraction unless submission, terminal state
 - **AND** scheduler evidence records the failed or non-terminal condition clearly
 
 #### Scenario: Extraction is blocked by inconsistent scheduler evidence
-- **WHEN** scheduler records disagree on receipt ID, run ID, job ID, timestamp order, exit status, payload evidence, accounting linkage, or raw-output identity
+- **WHEN** scheduler records or the nested submission identity disagree on receipt ID, run ID, scheduler identity or mode, job ID, configured payload command, timestamp order, exit status, payload evidence, accounting linkage, or raw-output identity
 - **THEN** downstream extraction does not run
 - **AND** the failed receipt validation identifies each inconsistency
 
@@ -233,11 +233,11 @@ The system SHALL support configurable local async timing so operator demos exerc
 #### Scenario: Controlled source delay contract changes explicitly
 - **WHEN** controlled-source templates change to support synthetic runtime delay
 - **THEN** the delay is owned by the controlled-source demo payload rather than a wrapper-owned scheduler invocation
-- **AND** bootstrap compatibility checks, default controlled-source refs, tests, and documentation are updated consistently rather than mutating the existing `controlled-source-demo-v0.1.0` tag contract silently
-- **AND** a new controlled-source demo tag such as `controlled-source-demo-v0.1.1` identifies the updated payload contract
+- **AND** bootstrap compatibility checks, default controlled-source refs, tests, and documentation advance through versioned contracts without mutating older tags
+- **AND** the current atomic-extractor payload contract is identified by `controlled-source-demo-v0.1.2`
 
 ### Requirement: Product inputs are validated before report generation
-The system SHALL validate every extracted CSV consumed by report generation before report products are created.
+The system SHALL validate every extracted CSV consumed by report generation before report products are created, bind successful validation to the CSV size and SHA-256, and recheck that binding against the exact bytes immediately before report consumption.
 
 #### Scenario: Required and ad hoc extracts are valid
 - **WHEN** required and ad hoc CSVs satisfy their configured headers, row/cardinality, logical-group, and field-type constraints

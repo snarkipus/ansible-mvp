@@ -38,7 +38,7 @@ This change strengthens capture and binding. Preservation remains future archive
 
 ### 1. Validate identifiers and paths through one root-aware policy
 
-Introduce shared validation that accepts a candidate path and its designated root, resolves both without requiring the destination to exist, and rejects absolute paths, `..` traversal, and resolved escape. Apply it to run layout paths, materialization source/destination paths, stage working directories, expected inputs/outputs, evidence paths, and product paths before workspace creation.
+Introduce shared validation that accepts a candidate path and its designated root, resolves both without requiring the destination to exist, and rejects absolute paths, `..` traversal, and resolved escape. Apply it to run layout paths, each materialization source directly against the controlled-source root, each materialization destination directly against its simulation or provenance root, stage working directories, expected inputs/outputs, evidence paths, and product paths before workspace creation. Containment of a shared ancestor is not a substitute for either direct materialization check.
 
 Constrain `run_id` to `[A-Za-z0-9][A-Za-z0-9._-]*`. This keeps existing examples valid while making path interpolation safe and predictable. Validation belongs in Python so CLI, Make, and Ansible entry paths receive the same policy; Ansible may add an early assertion for operator feedback but is not the authority.
 
@@ -50,13 +50,13 @@ Build a controlled-artifact identity for every fixture, runtime script, engine, 
 
 Materialize selected-tree bytes into a per-run code/input bundle. Inputs and `run-script.sh` continue to land at their simulation-contract destinations. Engine and extractor dependencies land under `provenance/controlled-source/` and execute from there. All controlled materializations are made read-only after preserving required executable mode. Immediately before payload launch, the scheduler-owned wrapper rehashes the declared runtime script, delegated engine, and complete controlled-input closure against admitted identities; extraction performs the same check for each extractor immediately before execution. Evidence records both source identity and destination hash; materialization or pre-consumption verification fails if they disagree.
 
-The live controlled-source worktree must still be a clean Git worktree for the MVP entrance gate, but execution correctness no longer depends on it remaining at the selected ref after admission.
+The live controlled-source worktree must still be a clean Git worktree for the MVP entrance gate, but execution correctness no longer depends on it remaining at the selected ref after admission. The admitted selected commit and admitted artifact identities remain authoritative if a requested ref, worktree, or mutable inventory changes later; manifest assembly uses those admitted identities rather than re-resolving mutable repository state.
 
 **Alternatives considered:** repeated worktree/hash checks before each stage still leave time-of-check/time-of-use windows; a detached Git worktree introduces cleanup and worktree-administration complexity; direct `git show` on every execution does not provide stable executable paths. A per-run materialization is simple, inspectable, and naturally belongs with run evidence.
 
 ### 3. Version controlled-source template behavior explicitly
 
-Atomic extractor output changes alter controlled payload bytes. Bootstrap creates/verifies a new immutable demo tag `controlled-source-demo-v0.1.2`; it does not mutate prior tags. Defaults, tests, and docs move together. Existing sibling repositories are accepted only when they contain the exact required tag and compatible tracked content.
+Atomic extractor output changes alter controlled payload bytes. Bootstrap creates the versioned demo tag `controlled-source-demo-v0.1.2` for a new compatible repository and never rewrites that tag in an existing repository; it also does not mutate prior tags. Git tags are not inherently immutable, so preflight's admitted resolved commit—not the later tag value—is authoritative throughout the run. Defaults, tests, and docs move together. Existing sibling repositories are accepted only when they contain the exact required tag and compatible tracked content.
 
 ### 4. Validate one coherent scheduler receipt
 
@@ -69,7 +69,7 @@ Create a scheduler-receipt validator shared by extraction, manifest assembly, an
 - accounting that links to the same payload evidence;
 - the declared raw output to exist with a hash matching payload output evidence.
 
-Extraction consumes the validated receipt result rather than checking one JSON field. The manifest includes receipt status and links to component evidence. Local mock files remain mutable and are described as local scheduler evidence, not independent authority.
+Extraction consumes a freshly computed validation result over the complete component set rather than checking one JSON field or trusting an earlier receipt. Manifest smoke independently reruns the same complete scheduler-component coherence check. The manifest includes receipt status and links to component evidence. Local mock files remain mutable and are described as local scheduler evidence, not independent authority.
 
 **Alternatives considered:** strengthening only `job-state.json` would preserve multiple unverified sources of truth; cryptographic signing is outside MVP preservation scope.
 
@@ -79,13 +79,13 @@ Wrap support-stage operations in a common attempt context that records start tim
 
 ### 6. Validate before reporting and publish products atomically
 
-Reorder configured stages so required and ad hoc CSV validation completes before report generation. Define explicit shape/content checks for both CSVs, including expected headers, numeric fields, logical groups, and the synthetic minimum row/cardinality expectations used by reports.
+Reorder configured stages so required and ad hoc CSV validation completes before report generation. Define explicit shape/content checks for both CSVs, including expected headers, numeric fields, logical groups, and the synthetic minimum row/cardinality expectations used by reports. Each successful validation receipt records the validated CSV size and SHA-256, and report generation rechecks those fields against the exact CSV bytes it is about to consume.
 
 Extractors and report generation write to sibling temporary paths, close and validate outputs, then use atomic replacement. Failed stages remove their temporary files and do not replace a previously published final path. Report validation reopens XLSX/PPTX and verifies the PNG signature after generation; it does not promise deterministic Office-document bytes.
 
 ### 7. Separate manifest contents from finalization receipts
 
-The manifest includes all configured stages completed before manifest assembly. Manifest assembly writes the final manifest first, then writes sibling assembly-stage evidence that identifies the assembled manifest hash. `manifest_smoke` validates that exact manifest plus its assembly receipt and writes separate sibling smoke-stage and validation receipts. Neither finalization step is embedded in the immutable content it finalizes or verifies.
+The manifest includes all configured stages completed before manifest assembly. Manifest assembly writes the finalized manifest first, then writes sibling assembly-stage evidence that identifies its hash. `manifest_smoke` requires that receipt to be a mapping for stage `manifest` with passing status, zero return code, its own expected evidence path, the checked manifest path, and the matching SHA-256. Any mismatch is a semantic failure written to sibling failed smoke evidence without changing the manifest. Neither finalization step is embedded in the content it finalizes or verifies, and the sibling receipts do not provide signing, trusted timestamping, tamper-evident storage, or immutable preservation.
 
 Manifest smoke evolves into semantic validation. It checks configured pre-assembly stage uniqueness/order/success, the external assembly receipt and manifest hash, commit and artifact identity agreement, scheduler receipt coherence, required artifact existence and SHA-256 syntax/value, successful product validations, and product producer references. This remains code-based validation; formal versioned schema work tracked separately is not absorbed.
 
@@ -126,12 +126,13 @@ None required before implementation. If formal manifest schema work (`ansible-mv
 
 ## Implementation Reconciliation
 
-Final archive review found unresolved enforcement gaps in direct
-materialization path containment, integrity checks anchored to admitted Git
-identities, complete scheduler-component coherence, validation-receipt binding,
-manifest finalization against the originally admitted commit, and independent
-post-manifest scheduler verification. The change remains active until these
-gaps and their regression tests are complete.
+Final archive review identified enforcement gaps in direct materialization path
+containment, integrity checks anchored to admitted Git identities, complete
+scheduler-component coherence, validation-receipt binding, manifest
+finalization against the originally admitted commit, and independent
+post-manifest scheduler verification. Those gaps are now reconciled in the
+implementation and requirements. No intentional behavior deviation remains;
+formal schema and real-LSF work remain separately tracked non-goals.
 
 In this MVP, "immutable per-run code" means read-only materialization from an
 identified selected commit with pre-execution mode and SHA-256 verification. It

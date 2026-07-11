@@ -27,8 +27,8 @@ controlled input/tag
         -> raw sim output
           -> extract_required
             -> required.csv
-              -> validation
-                -> immutable manifest
+              -> byte-bound validation
+                -> finalized, hash-identified manifest
                   -> sibling assembly/smoke hash receipts
 ```
 
@@ -104,7 +104,9 @@ SHA-256 matching the Git-tracked blob recorded under `repositories`.
 
 Those identities come from the selected Git tree, not a later worktree read.
 Inputs and executable code are copied into read-only run-local destinations and
-their modes and hashes are verified immediately before use.
+their modes and hashes are verified immediately before use. Source and
+destination containment is checked before access. Later tag, worktree, or
+inventory edits cannot replace the admitted selected-commit identity.
 
 Note that `dirA`, `dirB`, and `dirC` deliberately repeat across `input/`,
 `lists/`, and `files/`. Every evidence record therefore carries the full
@@ -176,7 +178,9 @@ workflow to proceed to extraction.
 state, terminal state, accounting, and payload evidence share the same receipt,
 run, and job identities; timestamps are monotonic; terminal and accounting
 status are `DONE`/zero; and the raw-output identity agrees. The manifest embeds
-that coherence verdict under `scheduler.receipt_validation`.
+that coherence verdict under `scheduler.receipt_validation`. Extraction
+recomputes it fresh rather than trusting a stale component or standalone
+`DONE` value.
 
 ## Payload execution evidence
 
@@ -281,6 +285,8 @@ The `validate` stage checked the CSV against
   "total_rows": 4,
   "data_rows": 3,
   "header": ["logical_group", "example", "bytes", "sha256_prefix"],
+  "size_bytes": 129,
+  "sha256": "d02d79e1372bb8ef28ff223f4816d3959dec990c574442cdd93e6d53624be815",
   "checks": [
     {"name": "non_empty",              "status": "pass"},
     {"name": "minimum_data_row_count", "status": "pass"},
@@ -289,6 +295,9 @@ The `validate` stage checked the CSV against
   ]
 }
 ```
+
+Reports verify this path, size, and SHA-256 against current bytes and consume
+those exact bytes. Changed bytes invalidate an earlier pass.
 
 ## Manifest links
 
@@ -316,8 +325,8 @@ document. For `required.csv` specifically:
     size_bytes: 129
   ```
 
-- `validations` — the semantic shape-check verdict for the same path, plus the
-  validation receipt path and SHA-256.
+- `validations` — the semantic verdict and exact product size/SHA-256 binding,
+  plus the validation receipt path and receipt SHA-256.
 
 ## Final manifest receipts
 
@@ -329,7 +338,8 @@ producer links, scheduler coherence, and successful product validations. It
 then writes `provenance/validations/manifest_smoke.json` and
 `provenance/logs/manifest_smoke.stage.json` with the same manifest hash.
 
-This avoids self-reference: neither finalization receipt is embedded in the
+Assembly verifies controlled artifacts against admitted selected-commit
+identities, not mutable inventories. This avoids self-reference: neither finalization receipt is embedded in the
 manifest it finalizes or verifies. The hashes provide local integrity checks
 and selected-commit binding, but no signature, trusted timestamp, tamper-proof
 storage, or immutable archive.

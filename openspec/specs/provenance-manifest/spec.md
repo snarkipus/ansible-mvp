@@ -77,8 +77,9 @@ The system SHALL include first-class stage-attempt evidence for every configured
 
 #### Scenario: Manifest assembly receipt is written externally
 - **WHEN** manifest assembly successfully writes the final manifest bytes
-- **THEN** sibling assembly-stage evidence records successful assembly and the final manifest SHA-256
-- **AND** smoke validation requires that external receipt to agree with the manifest it checks
+- **THEN** sibling assembly-stage evidence is a mapping that records stage name `manifest`, status `pass`, return code `0`, its own evidence path, the finalized manifest path, and the final manifest SHA-256
+- **AND** smoke validation requires every identity, outcome, path, and hash field in that external receipt to agree with the receipt and manifest it checks
+- **AND** any disagreement is a semantic failure recorded in sibling failed smoke evidence without rewriting the manifest
 
 ### Requirement: Manifest stage records include lifecycle metadata
 The system SHALL include lifecycle classification metadata in manifest stage records so readers can distinguish operator-facing factory stages from demo bootstrap, admission, setup, evidence, and finalization steps.
@@ -125,7 +126,7 @@ The system SHALL reserve manifest vocabulary for artifact archive, retention, pr
 - **THEN** the manifest can represent it as an external reference with location, hash status, retention class, and provenance lineage
 
 ### Requirement: Manifest captures validation results
-The system SHALL record configured validation results for every extracted product consumed by report generation.
+The system SHALL record configured validation results, including size and SHA-256 of the validated CSV bytes, for every extracted product consumed by report generation, and reports SHALL consume the CSV only after those receipt fields are rechecked against the exact bytes to be read.
 
 #### Scenario: Required extract validation passes
 - **WHEN** `provenance/products/extracted/required.csv` satisfies configured headers, field types, logical groups, and expected synthetic row/cardinality constraints
@@ -140,12 +141,19 @@ The system SHALL record configured validation results for every extracted produc
 - **THEN** successful required and ad hoc extract validation evidence already exists
 
 ### Requirement: Manifest smoke validation is available
-The system SHALL provide a post-manifest verification step that checks required manifest structure and semantic consistency, then records a sibling receipt for the exact manifest bytes verified.
+The system SHALL provide a post-manifest verification step that requires explicit configuration, run, workspace, and stage/receipt context, checks required manifest structure and semantic consistency without a structural-only success path, then records a sibling receipt for the exact manifest bytes verified.
 
 #### Scenario: Manifest smoke test passes
 - **WHEN** a clean synthetic run completes manifest assembly
-- **THEN** smoke validation verifies required sections, configured pre-assembly stage completeness and success, the external assembly receipt and manifest hash, artifact existence and hashes, controlled-source identity agreement, scheduler receipt coherence, successful product validations, and producer references
+- **THEN** smoke validation verifies required sections, configured pre-assembly stage completeness and success, the external assembly receipt and unchanged manifest hash, artifact existence plus current byte size and SHA-256 against recorded identity, admitted selected-commit identity agreement without re-resolving mutable refs/worktrees/inventories, freshly recomputed complete scheduler-component coherence, exactly one receipt at each configured normalized `evidence_path` identifying the configured product path and exactly one current derived-product record and file before checking recorded product size and SHA-256, and producer references
+- **AND** the run-local controlled-code inventory covers every selected runtime, engine, and extractor artifact exactly once regardless of mutable inventory role values
 - **AND** `provenance/validations/manifest_smoke.json` records the SHA-256 of the final `provenance/manifest.yaml` artifact left on disk
+
+#### Scenario: Smoke context is bound to one configured run
+- **WHEN** post-manifest verification is requested for a run
+- **THEN** the CLI run ID agrees with `manifest.run.run_id`, the manifest run and provenance roots agree with the configured resolved roots, and the supplied manifest and smoke stage-evidence paths equal the configured paths for that run
+- **AND** the external assembly receipt is read only from the configured contained manifest stage-evidence path
+- **AND** any cross-run path or symlink escape is rejected before smoke attempt evidence is written
 
 #### Scenario: Post-manifest evidence remains external
 - **WHEN** manifest assembly and smoke write their stage-attempt and validation evidence
@@ -171,11 +179,12 @@ The system SHALL provide repeatable Python quality checks using `uv`, `ruff`, `b
 - **THEN** `ruff format --check`, `ruff check`, `basedpyright`, and `pytest` run through `uv` and complete successfully
 
 ### Requirement: Manifest captures async scheduler boundary evidence
-The system SHALL represent mock scheduler submission, terminal state, normalized job state, accounting, payload execution evidence, and raw-output identity as distinct components of one validated scheduler receipt.
+The system SHALL represent mock scheduler submission, terminal state, normalized job state, accounting, payload execution evidence, and raw-output identity as distinct components of one validated scheduler receipt, with complete coherence freshly checked during post-manifest smoke rather than inferred from a stored pass status.
 
 #### Scenario: Scheduler boundary evidence is coherent
 - **WHEN** a clean synthetic run completes through the local async mock scheduler
 - **THEN** the manifest scheduler section records a passed receipt status and links components that agree on unique receipt ID, scheduler mode, run ID, job ID, monotonic lifecycle timestamps, terminal `DONE`, zero exit status, successful payload evidence, accounting linkage, and raw-output identity
+- **AND** the nested submission record repeats and agrees with the top-level run ID, scheduler identity, mode, job ID, receipt ID, and configured controlled payload command
 
 #### Scenario: Scheduler failure is represented
 - **WHEN** the mock scheduler job exits unsuccessfully, times out, cannot be collected, or produces inconsistent component evidence

@@ -12,7 +12,6 @@ from provenance.config import read_config_mapping, validate_run_configuration
 from provenance.git_state import (
     SelectedTreeArtifactIdentity,
     capture_repository_state,
-    resolve_ref,
     selected_tree_artifact_identity,
 )
 from provenance.hashing import hash_artifact, sha256_file
@@ -63,6 +62,8 @@ class MaterializedArtifact:
     sim_area: str | None = None
     logical_group: str | None = None
     role: str = "artifact"
+    source_category: str = "controlled_artifact"
+    destination_category: str = "run_artifact"
 
     def to_dict(self) -> dict[str, str | None]:
         """Return a JSON/YAML friendly representation."""
@@ -84,6 +85,8 @@ class MaterializedArtifact:
             "sim_area": self.sim_area,
             "logical_group": self.logical_group,
             "role": self.role,
+            "source_category": self.source_category,
+            "destination_category": self.destination_category,
         }
 
 
@@ -183,16 +186,29 @@ def materialize_inputs(
     source_root = Path(_non_empty_string(inputs.get("source_root"), "source_root"))
     destination_root = Path(_non_empty_string(inputs.get("destination_root"), "destination_root"))
     mode = _non_empty_string(inputs.get("mode"), "mode")
+    run_root = resolve_layout_path(root, layout, "run_root", run_id)
     sim_run_root = resolve_layout_path(root, layout, "sim_run_root", run_id)
+    input_root = resolve_root_relative_path(
+        sim_run_root, "input", field_name="materialization.inputs designated input area"
+    )
 
     artifacts: list[MaterializedArtifact] = []
     for group in _string_list(
         inputs.get("logical_groups"), "materialization.inputs.logical_groups"
     ):
         for filename in _string_list(inputs.get("files"), "materialization.inputs.files"):
-            source_relative = source_root / group / filename
-            destination_relative = destination_root / group / filename
-            destination = sim_run_root.parent / destination_relative
+            source_path = resolve_root_relative_path(
+                controlled_root,
+                source_root / group / filename,
+                field_name="materialization.inputs source path",
+            )
+            source_relative = source_path.relative_to(controlled_root)
+            destination = _resolve_materialization_destination(
+                run_root,
+                destination_root / group / filename,
+                designated_root=input_root,
+                field_name="materialization.inputs destination path",
+            )
             artifacts.append(
                 _materialize_selected_file(
                     root=root,
@@ -206,6 +222,8 @@ def materialize_inputs(
                     sim_area="input",
                     logical_group=group,
                     role="input",
+                    source_category="controlled_input",
+                    destination_category="simulation_input",
                 )
             )
 
@@ -218,8 +236,9 @@ def verify_materialization_evidence(
     evidence_path: Path | str,
     *,
     workspace_root: Path | str,
+    controlled_source_repo: Path | str,
 ) -> tuple[dict[str, Any], ...]:
-    """Verify materialized bytes and modes against their selected-tree identities."""
+    """Verify materialized bytes and modes against preflight-admitted Git identities."""
 
     path = Path(evidence_path)
     if not path.is_absolute():
@@ -231,13 +250,99 @@ def verify_materialization_evidence(
         raise ValueError(f"materialization evidence must contain an artifacts list: {path}")
 
     root = Path(workspace_root).expanduser().resolve()
+    preflight_path = path.parent.parent / "preflight.json"
+    if not preflight_path.is_file():
+        raise ValueError(f"preflight admission evidence is missing: {preflight_path}")
+    preflight = json.loads(preflight_path.read_text(encoding="utf-8"))
+    admitted_raw = preflight.get("controlled_artifacts") if isinstance(preflight, dict) else None
+    if not isinstance(admitted_raw, list):
+        raise ValueError("preflight admission evidence must contain controlled_artifacts")
+    admitted: dict[str, dict[str, Any]] = {}
+    for artifact in admitted_raw:
+        if not isinstance(artifact, dict):
+            raise ValueError("preflight controlled artifact must be a mapping")
+        destination = artifact.get("destination_path")
+        if not isinstance(destination, str) or not destination:
+            raise ValueError("preflight controlled artifact destination_path is incomplete")
+        if destination in admitted:
+            raise ValueError(f"preflight admits duplicate destination_path: {destination}")
+        admitted[destination] = artifact
+
+    inventory_roles = {
+        "materialized_inputs.json": {"input"},
+        "materialized_runtime_scripts.json": {"runtime_script", "controlled_code"},
+    }
+    applicable_roles = inventory_roles.get(path.name)
+    if applicable_roles is None:
+        raise ValueError(f"unknown materialization evidence inventory: {path.name}")
+    expected_destinations = {
+        destination
+        for destination, artifact in admitted.items()
+        if artifact.get("role") in applicable_roles
+    }
+    actual_destinations: list[str] = []
+    for artifact in loaded["artifacts"]:
+        if not isinstance(artifact, dict):
+            raise ValueError(f"materialization artifact must be a mapping: {path}")
+        destination = artifact.get("destination_path")
+        if not isinstance(destination, str) or not destination:
+            raise ValueError(f"materialization artifact destination_path is incomplete: {path}")
+        actual_destinations.append(destination)
+    duplicate_destinations = sorted(
+        destination
+        for destination in set(actual_destinations)
+        if actual_destinations.count(destination) > 1
+    )
+    if duplicate_destinations:
+        raise ValueError(
+            "materialization evidence contains duplicate destination rows: "
+            + ", ".join(duplicate_destinations)
+        )
+    actual_set = set(actual_destinations)
+    if actual_set != expected_destinations:
+        missing = sorted(expected_destinations - actual_set)
+        unexpected = sorted(actual_set - expected_destinations)
+        raise ValueError(
+            "materialization evidence must cover every applicable preflight-admitted artifact "
+            f"exactly once; missing={missing}, unexpected={unexpected}"
+        )
+    controlled_root = Path(controlled_source_repo).expanduser().resolve()
     verified: list[dict[str, Any]] = []
     for raw_artifact in loaded["artifacts"]:
-        if not isinstance(raw_artifact, dict):
-            raise ValueError(f"materialization artifact must be a mapping: {path}")
         destination_value = raw_artifact.get("destination_path")
-        expected_hash = raw_artifact.get("source_sha256")
-        expected_mode = raw_artifact.get("destination_file_mode")
+        admission = admitted.get(destination_value)
+        if not isinstance(admission, dict):
+            raise ValueError(
+                f"materialization artifact was not admitted by preflight: {destination_value}"
+            )
+        selected_commit = admission.get("selected_commit")
+        source_path = admission.get("relative_path")
+        if not isinstance(selected_commit, str) or not isinstance(source_path, str):
+            raise ValueError(f"preflight artifact identity is incomplete: {destination_value}")
+        identity = selected_tree_artifact_identity(controlled_root, selected_commit, source_path)
+        immutable_fields = {
+            "source_resolved_commit": selected_commit,
+            "source_path": source_path,
+            "source_blob_oid": identity.blob_oid,
+            "source_file_mode": identity.file_mode,
+            "source_sha256": identity.sha256,
+            "destination_path": admission.get("destination_path"),
+            "destination_file_mode": admission.get("destination_file_mode"),
+            "materialization_mode": admission.get("materialization_mode"),
+            "sim_area": admission.get("sim_area"),
+            "logical_group": admission.get("logical_group"),
+            "role": admission.get("role"),
+            "source_category": admission.get("source_category"),
+            "destination_category": admission.get("destination_category"),
+        }
+        for field, expected in immutable_fields.items():
+            if raw_artifact.get(field) != expected:
+                raise ValueError(
+                    f"materialization inventory disagrees with preflight admission for "
+                    f"{destination_value}: {field}"
+                )
+        expected_hash = identity.sha256
+        expected_mode = admission.get("destination_file_mode")
         if not all(
             isinstance(value, str) and value for value in (destination_value, expected_hash)
         ):
@@ -300,16 +405,38 @@ def materialize_runtime_scripts(
         "materialization.runtime_scripts",
     )
     run_root = resolve_layout_path(root, layout, "run_root", run_id)
+    sim_run_root = resolve_layout_path(root, layout, "sim_run_root", run_id)
+    provenance_root = resolve_layout_path(root, layout, "provenance_root", run_id)
+    runtime_root = resolve_root_relative_path(
+        sim_run_root, "procs", field_name="controlled runtime-script designated area"
+    )
+    controlled_code_root = resolve_root_relative_path(
+        provenance_root,
+        "controlled-source",
+        field_name="controlled-code designated area",
+    )
 
     artifacts: list[MaterializedArtifact] = []
     for script_name in runtime_script_names:
         script = _mapping(configured_scripts.get(script_name), f"controlled_scripts.{script_name}")
-        source_relative = Path(_non_empty_string(script.get("relative_path"), "relative_path"))
+        source_path = resolve_root_relative_path(
+            controlled_root,
+            _non_empty_string(script.get("relative_path"), "relative_path"),
+            field_name=f"controlled_scripts.{script_name}.relative_path",
+        )
+        source_relative = source_path.relative_to(controlled_root)
         materialized_path = Path(
             _non_empty_string(script.get("materialized_path"), "materialized_path")
         )
         mode = _non_empty_string(script.get("materialization_mode"), "materialization_mode")
-        destination = run_root / materialized_path
+        role = "runtime_script" if script_name == "run_script" else "controlled_code"
+        designated_root = runtime_root if role == "runtime_script" else controlled_code_root
+        destination = _resolve_materialization_destination(
+            run_root,
+            materialized_path,
+            designated_root=designated_root,
+            field_name=f"controlled_scripts.{script_name}.materialized_path",
+        )
         artifacts.append(
             _materialize_selected_file(
                 root=root,
@@ -321,8 +448,10 @@ def materialize_runtime_scripts(
                 head_commit=head_commit,
                 mode=mode,
                 sim_area="procs" if materialized_path.parts[0] == "sim-run-root" else None,
-                logical_group=None,
-                role="runtime_script" if script_name == "run_script" else "controlled_code",
+                logical_group=script_name,
+                role=role,
+                source_category="controlled_script",
+                destination_category=role,
             )
         )
 
@@ -331,6 +460,21 @@ def materialize_runtime_scripts(
         root, config, run_id, "materialized_runtime_scripts.json", result
     )
     return result
+
+
+def _resolve_materialization_destination(
+    run_root: Path,
+    candidate: Path | str,
+    *,
+    designated_root: Path,
+    field_name: str,
+) -> Path:
+    """Resolve a run-relative destination and constrain it to its declared area."""
+
+    destination = resolve_root_relative_path(run_root, candidate, field_name=field_name)
+    if not destination.is_relative_to(designated_root):
+        raise ValueError(f"{field_name} must be under its designated area: {designated_root}")
+    return destination
 
 
 def _materialization_context(
@@ -348,17 +492,35 @@ def _materialization_context(
         raise ValueError(
             f"controlled source repository must be a Git worktree: {controlled_source_repo}"
         )
-    if not controlled_state.is_clean:
-        dirty = ", ".join(entry.path for entry in controlled_state.status_entries)
+    preflight_path = root / "runs" / run_id / "provenance" / "preflight.json"
+    if not preflight_path.is_file():
+        raise ValueError(f"preflight admission evidence is missing: {preflight_path}")
+    try:
+        preflight = json.loads(preflight_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        raise ValueError(f"preflight admission evidence is unreadable: {preflight_path}") from exc
+    admitted_repo = preflight.get("controlled_source_repo") if isinstance(preflight, dict) else None
+    if not isinstance(admitted_repo, dict) or preflight.get("status") != "pass":
         raise ValueError(
-            f"controlled source repository must be clean before materialization: {dirty}"
+            "preflight admission evidence does not contain a passed controlled repository"
         )
-    resolved_commit = resolve_ref(controlled_state.top_level, controlled_source_ref).resolved_commit
+    admitted_path = admitted_repo.get("path")
+    admitted_ref = admitted_repo.get("ref")
+    resolved_commit = admitted_repo.get("resolved_commit")
+    admitted_head = admitted_repo.get("head_commit")
+    if admitted_path != controlled_state.top_level.as_posix():
+        raise ValueError("controlled source repository disagrees with preflight admission")
+    if admitted_ref != controlled_source_ref:
+        raise ValueError("controlled source ref disagrees with preflight admission")
+    if not isinstance(resolved_commit, str) or not resolved_commit:
+        raise ValueError("preflight controlled source resolved commit is missing")
+    # Deliberately do not resolve the caller's ref here: it may have moved after
+    # admission. Git object lookup below is pinned to this admitted commit.
     return (
         root,
         controlled_state.top_level,
         resolved_commit,
-        controlled_state.head_commit,
+        admitted_head if isinstance(admitted_head, str) else None,
         _read_yaml_mapping(Path(config_path)),
     )
 
@@ -376,6 +538,8 @@ def _materialize_selected_file(
     sim_area: str | None,
     logical_group: str | None,
     role: str,
+    source_category: str,
+    destination_category: str,
 ) -> MaterializedArtifact:
     identity: SelectedTreeArtifactIdentity = selected_tree_artifact_identity(
         controlled_root, resolved_commit, source_relative
@@ -405,6 +569,8 @@ def _materialize_selected_file(
         sim_area=sim_area,
         logical_group=logical_group,
         role=role,
+        source_category=source_category,
+        destination_category=destination_category,
     )
 
 

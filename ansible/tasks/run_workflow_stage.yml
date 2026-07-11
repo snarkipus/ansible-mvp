@@ -1,0 +1,28 @@
+---
+- name: "Execute workflow stage: {{ workflow_stage_target }}"
+  ansible.builtin.command:
+    argv:
+      - "{{ make_executable }}"
+      - "{{ workflow_stage_target }}"
+      - "RUN_ID={{ workflow_run_id }}"
+      - "CONTROLLED_SOURCE_REPO={{ workflow_controlled_source_repo }}"
+      - "CONTROLLED_SOURCE_REF={{ workflow_controlled_source_ref }}"
+  args:
+    chdir: "{{ provenance_wrapper_repo }}"
+  register: workflow_stage_result
+  changed_when: true
+  failed_when: false
+
+- name: "Report workflow stage failure: {{ workflow_stage_target }}"
+  ansible.builtin.fail:
+    msg: |-
+      Workflow stage '{{ workflow_stage_target }}' failed (exit {{ workflow_stage_result.rc }}).
+      {{ workflow_stage_result.stderr_lines
+         | default([])
+         | reject('match', '^make:')
+         | join('\n')
+         | default('No error detail was written to stderr.', true) }}
+      Stage evidence (if available): runs/{{ workflow_run_id }}/provenance/logs/{{ workflow_stage_target | replace('-', '_') }}.stage.json
+      Scheduler receipt: runs/{{ workflow_run_id }}/provenance/validations/scheduler_receipt.json
+      Focused rerun: {{ make_executable }} {{ workflow_stage_target }} RUN_ID={{ workflow_run_id }} CONTROLLED_SOURCE_REPO={{ workflow_controlled_source_repo }} CONTROLLED_SOURCE_REF={{ workflow_controlled_source_ref }}
+  when: workflow_stage_result.rc != 0

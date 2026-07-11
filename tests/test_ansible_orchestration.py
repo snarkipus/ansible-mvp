@@ -59,20 +59,41 @@ def test_playbook_uses_documented_extra_vars_and_make_contract() -> None:
     play = playbook[0]
 
     assert play["hosts"] == "provenance_mvp"
-    rendered_playbook = yaml.safe_dump(play)
-    assert "run_id | default(default_run_id)" in rendered_playbook
-    assert "^[A-Za-z0-9][A-Za-z0-9._-]*$" in rendered_playbook
-    assert "controlled_source_repo | default(default_controlled_source_repo)" in rendered_playbook
-    assert "controlled_source_ref | default(default_controlled_source_ref)" in rendered_playbook
-    assert "RUN_ID=" in rendered_playbook
-    assert "workflow_run_id" in rendered_playbook
-    assert "CONTROLLED_SOURCE_REPO=" in rendered_playbook
-    assert "workflow_controlled_source_repo" in rendered_playbook
-    assert "CONTROLLED_SOURCE_REF=" in rendered_playbook
-    assert "workflow_controlled_source_ref" in rendered_playbook
-    assert "list-run-stage-targets" in rendered_playbook
-    assert "from_json" in rendered_playbook
-    assert "loop" in rendered_playbook
+    stage_tasks = yaml.safe_load(
+        (ROOT / "ansible/tasks/run_workflow_stage.yml").read_text(encoding="utf-8")
+    )
+    assert isinstance(stage_tasks, list)
+    rendered_contract = yaml.safe_dump([play, stage_tasks])
+    assert "run_id | default(default_run_id)" in rendered_contract
+    assert "^[A-Za-z0-9][A-Za-z0-9._-]*$" in rendered_contract
+    assert "controlled_source_repo | default(default_controlled_source_repo)" in rendered_contract
+    assert "controlled_source_ref | default(default_controlled_source_ref)" in rendered_contract
+    assert "RUN_ID=" in rendered_contract
+    assert "workflow_run_id" in rendered_contract
+    assert "CONTROLLED_SOURCE_REPO=" in rendered_contract
+    assert "workflow_controlled_source_repo" in rendered_contract
+    assert "CONTROLLED_SOURCE_REF=" in rendered_contract
+    assert "workflow_controlled_source_ref" in rendered_contract
+    assert "list-run-stage-targets" in rendered_contract
+    assert "from_json" in rendered_contract
+    assert "loop" in rendered_contract
+
+
+def test_stage_failure_output_is_concise_and_actionable() -> None:
+    stage_tasks = yaml.safe_load(
+        (ROOT / "ansible/tasks/run_workflow_stage.yml").read_text(encoding="utf-8")
+    )
+    execute, report = stage_tasks
+
+    assert execute["failed_when"] is False
+    assert execute["register"] == "workflow_stage_result"
+    message = report["ansible.builtin.fail"]["msg"]
+    assert "Workflow stage" in message
+    assert "workflow_stage_result.rc" in message
+    assert "Stage evidence" in message
+    assert "scheduler_receipt.json" in message
+    assert "Focused rerun" in message
+    assert "reject('match', '^make:')" in message
 
 
 def test_ansible_paths_are_wrapper_controlled_paths() -> None:
@@ -83,4 +104,5 @@ def test_ansible_paths_are_wrapper_controlled_paths() -> None:
         "ansible/inventory/localhost.ini",
         "ansible/inventory/group_vars/all.yml",
         "ansible/playbooks/run_synthetic_workflow.yml",
+        "ansible/tasks/run_workflow_stage.yml",
     }.issubset(controlled_paths)

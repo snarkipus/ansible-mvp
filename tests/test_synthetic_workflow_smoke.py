@@ -12,6 +12,7 @@ from typing import Any
 import pytest
 import yaml
 
+from provenance.cli import main
 from provenance.manifest import semantic_consistency_errors
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -215,9 +216,235 @@ def test_clean_synthetic_workflow_smoke_generates_manifest_reports_and_validatio
     )["status"] = "fail"
     assert_semantic_error(failed_validation, "missing or not successful")
 
+    commit_disagreement = deepcopy(manifest)
+    commit_disagreement["repositories"][1]["selected_artifacts"][0]["selected_commit"] = "0" * 40
+    assert_semantic_error(commit_disagreement, "selected commit does not match repository identity")
+
+    validation_product_disagreement = deepcopy(manifest)
+    validation_product_disagreement["validations"][0]["product_sha256"] = "0" * 64
+    assert_semantic_error(validation_product_disagreement, "validated product SHA-256")
+
+    validation_size_disagreement = deepcopy(manifest)
+    validation_size_disagreement["validations"][0]["size_bytes"] += 1
+    assert_semantic_error(validation_size_disagreement, "validated product size")
+
+    jointly_forged_size = deepcopy(manifest)
+    forged_validation = next(
+        validation
+        for validation in jointly_forged_size["validations"]
+        if validation.get("path") == "products/extracted/required.csv"
+    )
+    forged_product_record = next(
+        product
+        for product in jointly_forged_size["derived_products"]
+        if product.get("relative_path") == "products/extracted/required.csv"
+    )
+    forged_validation["size_bytes"] += 1
+    forged_product_record["size_bytes"] += 1
+    assert_semantic_error(jointly_forged_size, "size_bytes does not match on-disk artifact")
+
+    configured_validation = next(
+        validation
+        for validation in manifest["validations"]
+        if validation.get("path") == "products/extracted/required.csv"
+    )
+    wrong_evidence_path = deepcopy(manifest)
+    next(
+        validation
+        for validation in wrong_evidence_path["validations"]
+        if validation.get("path") == "products/extracted/required.csv"
+    )["evidence_path"] = f"runs/{run_id}/provenance/validations/renamed.json"
+    assert_semantic_error(wrong_evidence_path, "declared evidence_path")
+
+    missing_configured_receipt = deepcopy(manifest)
+    missing_configured_receipt["validations"].remove(
+        next(
+            validation
+            for validation in missing_configured_receipt["validations"]
+            if validation.get("path") == "products/extracted/required.csv"
+        )
+    )
+    assert_semantic_error(missing_configured_receipt, "declared evidence_path")
+
+    duplicate_configured_receipt = deepcopy(manifest)
+    duplicate_configured_receipt["validations"].append(deepcopy(configured_validation))
+    assert_semantic_error(duplicate_configured_receipt, "found 2")
+
+    required_product_path = "products/extracted/required.csv"
+    missing_product_record = deepcopy(manifest)
+    missing_product_record["derived_products"] = [
+        product
+        for product in missing_product_record["derived_products"]
+        if product.get("relative_path") != required_product_path
+    ]
+    assert_semantic_error(
+        missing_product_record, "must map to exactly one derived product; found 0"
+    )
+
+    duplicate_product_record = deepcopy(manifest)
+    required_product = next(
+        product
+        for product in duplicate_product_record["derived_products"]
+        if product.get("relative_path") == required_product_path
+    )
+    duplicate_product_record["derived_products"].append(deepcopy(required_product))
+    assert_semantic_error(
+        duplicate_product_record, "must map to exactly one derived product; found 2"
+    )
+
+    required_product_file = wrapper / required_product["run_relative_path"]
+    temporarily_missing = required_product_file.with_suffix(".temporarily-missing")
+    required_product_file.rename(temporarily_missing)
+    try:
+        assert_semantic_error(manifest, "derived product file is missing")
+    finally:
+        temporarily_missing.rename(required_product_file)
+
     scheduler_mismatch = deepcopy(manifest)
     scheduler_mismatch["scheduler"]["terminal_job_state"]["receipt_id"] = "wrong-receipt"
     assert_semantic_error(scheduler_mismatch, "terminal_job_state identity is inconsistent")
+
+    # Reuse this completed workflow for the full post-receipt mutation matrix.
+    scheduler_root = provenance_root / "scheduler"
+    mutation_cases = (
+        (scheduler_root / "submission.yaml", "receipt_id", "wrong", "does not match submission"),
+        (scheduler_root / "job-state.json", "job_id", "wrong", "job_state job_id"),
+        (scheduler_root / "terminal-state.json", "state", "EXIT", "terminal state must be DONE"),
+        (scheduler_root / "accounting.yaml", "receipt_id", "wrong", "accounting receipt_id"),
+        (
+            provenance_root / "logs" / "run_simulation.stage.json",
+            "status",
+            "fail",
+            "payload stage evidence must pass",
+        ),
+        (
+            scheduler_root / "accounting.yaml",
+            "finished_at",
+            "1900-01-01T00:00:00+00:00",
+            "finished_at values do not agree",
+        ),
+    )
+    smoke_args = [
+        "smoke-manifest",
+        str(manifest_path),
+        "--config",
+        str(wrapper / "configs" / "run.synthetic.yaml"),
+        "--output",
+        str(provenance_root / "validations" / "manifest_smoke.json"),
+        "--run-id",
+        run_id,
+        "--workspace-root",
+        str(wrapper),
+        "--controlled-source-repo",
+        str(wrapper.parent / "controlled-source-demo"),
+        "--controlled-source-ref",
+        CONTROLLED_REF,
+        "--stage-output",
+        str(provenance_root / "logs" / "manifest_smoke.stage.json"),
+    ]
+    for evidence_path, field, value, expected_error in mutation_cases:
+        original_evidence = evidence_path.read_bytes()
+        loaded = yaml.safe_load(original_evidence)
+        loaded[field] = value
+        evidence_path.write_text(
+            json.dumps(loaded) if evidence_path.suffix == ".json" else yaml.safe_dump(loaded),
+            encoding="utf-8",
+        )
+        assert main(smoke_args) == 1
+        failed_smoke = json.loads(
+            (provenance_root / "validations" / "manifest_smoke.json").read_text(encoding="utf-8")
+        )
+        assert any(expected_error in error for error in failed_smoke["semantic_errors"]), (
+            evidence_path,
+            failed_smoke,
+        )
+        assert manifest_path.read_bytes() == manifest_bytes
+        failed_stage_receipt = json.loads(
+            (provenance_root / "logs" / "manifest_smoke.stage.json").read_text(encoding="utf-8")
+        )
+        assert failed_stage_receipt["status"] == "fail"
+        evidence_path.write_bytes(original_evidence)
+
+    raw_output_path = sim_root / manifest["raw_simulation_outputs"][0]["relative_path"]
+    original_raw_output = raw_output_path.read_bytes()
+    raw_output_path.write_bytes(original_raw_output + b"tampered\n")
+    assert main(smoke_args) == 1
+    failed_smoke = json.loads(
+        (provenance_root / "validations" / "manifest_smoke.json").read_text(encoding="utf-8")
+    )
+    assert any("raw output hash" in error for error in failed_smoke["semantic_errors"])
+    assert manifest_path.read_bytes() == manifest_bytes
+    assert (
+        json.loads(
+            (provenance_root / "logs" / "manifest_smoke.stage.json").read_text(encoding="utf-8")
+        )["status"]
+        == "fail"
+    )
+    raw_output_path.write_bytes(original_raw_output)
+
+    validation_receipt_path = provenance_root / "validations" / "required_extract.json"
+    original_validation_receipt = validation_receipt_path.read_bytes()
+    receipt = json.loads(original_validation_receipt)
+    receipt["sha256"] = "0" * 64
+    validation_receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+    assert main(smoke_args) == 1
+    failed_smoke = json.loads(
+        (provenance_root / "validations" / "manifest_smoke.json").read_text(encoding="utf-8")
+    )
+    assert any(
+        "validations" in error and "SHA-256" in error for error in failed_smoke["semantic_errors"]
+    )
+    assert manifest_path.read_bytes() == manifest_bytes
+    validation_receipt_path.write_bytes(original_validation_receipt)
+
+    renamed_validation_receipt = validation_receipt_path.with_name("required_extract.renamed.json")
+    validation_receipt_path.rename(renamed_validation_receipt)
+    try:
+        assert main(smoke_args) == 1
+        failed_smoke = json.loads(
+            (provenance_root / "validations" / "manifest_smoke.json").read_text(encoding="utf-8")
+        )
+        assert any("artifact is missing" in error for error in failed_smoke["semantic_errors"])
+        assert manifest_path.read_bytes() == manifest_bytes
+    finally:
+        renamed_validation_receipt.rename(validation_receipt_path)
+
+    validated_product = provenance_root / "products" / "extracted" / "required.csv"
+    original_product = validated_product.read_bytes()
+    validated_product.write_bytes(original_product + b"tampered\n")
+    assert main(smoke_args) == 1
+    failed_smoke = json.loads(
+        (provenance_root / "validations" / "manifest_smoke.json").read_text(encoding="utf-8")
+    )
+    assert any(
+        "derived_products" in error and "SHA-256" in error
+        for error in failed_smoke["semantic_errors"]
+    )
+    assert manifest_path.read_bytes() == manifest_bytes
+    validated_product.write_bytes(original_product)
+
+    # Forging both product bindings in the receipt cannot hide current product bytes.
+    forged_product = original_product + b"jointly-forged\n"
+    validated_product.write_bytes(forged_product)
+    forged_receipt = json.loads(original_validation_receipt)
+    forged_receipt["sha256"] = hashlib.sha256(forged_product).hexdigest()
+    forged_receipt["size_bytes"] = len(forged_product)
+    validation_receipt_path.write_text(json.dumps(forged_receipt), encoding="utf-8")
+    assert main(smoke_args) == 1
+    failed_smoke = json.loads(
+        (provenance_root / "validations" / "manifest_smoke.json").read_text(encoding="utf-8")
+    )
+    assert any("derived_products" in error for error in failed_smoke["semantic_errors"])
+    assert manifest_path.read_bytes() == manifest_bytes
+    validation_receipt_path.write_bytes(original_validation_receipt)
+    validated_product.write_bytes(original_product)
+
+    # Finalization receipts remain external even after repeated failures.
+    assert manifest_path.read_bytes() == manifest_bytes
+    assert manifest_sha256 not in manifest_path.read_text(encoding="utf-8")
+    assert {stage["name"] for stage in manifest["stages"]}.isdisjoint(
+        {"manifest", "manifest_smoke"}
+    )
 
 
 def test_preflight_smoke_rejects_dirty_controlled_source(tmp_path: Path) -> None:

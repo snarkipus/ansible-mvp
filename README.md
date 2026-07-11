@@ -91,7 +91,7 @@ runs/demo_001/
 │   ├── input/  lists/  files/        # inputs and raw outputs
 │   └── procs/run-script.sh           # materialized controlled script
 └── provenance/                        # wrapper-owned evidence sidecar
-    ├── manifest.yaml                  # immutable run provenance spine
+    ├── manifest.yaml                  # finalized, hash-identified provenance spine
     ├── preflight.json
     ├── scheduler/                     # submission, job/terminal state, accounting
     ├── logs/                          # stage evidence; manifest receipt holds final hash
@@ -119,6 +119,13 @@ Start with `workflow.operator_flow` (the short stage story), then
 `logs/manifest.stage.json` and `validations/manifest_smoke.json`: both identify
 the SHA-256 of the unchanged `manifest.yaml`; neither receipt is embedded in
 the file it finalizes.
+
+The selected-commit identities admitted at preflight remain authoritative even
+if a tag, source worktree, or mutable inventory later changes. Direct
+materialization proves source and destination containment before access.
+Scheduler submission, state, terminal verdict, accounting, payload evidence,
+and raw-output identity must form one coherent receipt. CSV validation receipts
+bind the exact size and SHA-256 consumed by reports.
 
 The best way to understand what the manifest buys you is the artifact trace:
 [`docs/trace_required_csv.md`](docs/trace_required_csv.md) follows one CSV

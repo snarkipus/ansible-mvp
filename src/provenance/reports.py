@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import csv
+import hashlib
+import io
 import json
 import os
 import struct
@@ -47,10 +49,15 @@ def build_report_products(
     reports_root = provenance_root / "products" / "reports"
     reports_root.mkdir(parents=True, exist_ok=True)
 
-    _require_passed_report_input_validations(provenance_root)
+    required_bytes = _require_bound_report_input_validation(
+        provenance_root, "required_extract", required_path
+    )
+    ad_hoc_bytes = _require_bound_report_input_validation(
+        provenance_root, "ad_hoc_extract", ad_hoc_path
+    )
 
-    required_rows = _read_csv(required_path)
-    ad_hoc_rows = _read_csv(ad_hoc_path)
+    required_rows = _read_csv(required_bytes)
+    ad_hoc_rows = _read_csv(ad_hoc_bytes)
 
     final_paths = {name: reports_root / name for name in REPORT_FILENAMES}
     temporary_paths = {
@@ -90,14 +97,31 @@ def _temporary_report_path(root: Path, suffix: str) -> Path:
     return Path(name)
 
 
-def _require_passed_report_input_validations(provenance_root: Path) -> None:
-    for name in ("required_extract", "ad_hoc_extract"):
-        path = provenance_root / "validations" / f"{name}.json"
-        if not path.is_file():
-            raise ValueError(f"report generation requires passed validation evidence: {path}")
-        loaded = json.loads(path.read_text(encoding="utf-8"))
-        if not isinstance(loaded, dict) or loaded.get("status") != "pass":
-            raise ValueError(f"report generation requires passed {name} validation: {path}")
+def _require_bound_report_input_validation(
+    provenance_root: Path, name: str, product_path: Path
+) -> bytes:
+    receipt_path = provenance_root / "validations" / f"{name}.json"
+    if not receipt_path.is_file():
+        raise ValueError(f"report generation requires passed validation evidence: {receipt_path}")
+    loaded = json.loads(receipt_path.read_text(encoding="utf-8"))
+    if not isinstance(loaded, dict) or loaded.get("status") != "pass":
+        raise ValueError(f"report generation requires passed {name} validation: {receipt_path}")
+
+    expected_path = product_path.relative_to(provenance_root).as_posix()
+    if loaded.get("path") != expected_path:
+        raise ValueError(
+            f"report generation rejected {name} validation with product path "
+            f"{loaded.get('path')!r}; expected {expected_path!r}: {receipt_path}"
+        )
+    product_bytes = product_path.read_bytes()
+    actual_size = len(product_bytes)
+    actual_sha256 = hashlib.sha256(product_bytes).hexdigest()
+    if loaded.get("size_bytes") != actual_size or loaded.get("sha256") != actual_sha256:
+        raise ValueError(
+            f"report generation rejected stale {name} validation: current CSV size/SHA-256 "
+            f"does not match {receipt_path}; revalidate {product_path} before building reports"
+        )
+    return product_bytes
 
 
 def _validate_report_products(paths: dict[str, Path]) -> None:
@@ -117,9 +141,8 @@ def _resolve_product_path(path: Path | str | None, default: Path) -> Path:
     return candidate
 
 
-def _read_csv(path: Path) -> list[dict[str, str]]:
-    with path.open(newline="", encoding="utf-8") as file_obj:
-        return list(csv.DictReader(file_obj))
+def _read_csv(product_bytes: bytes) -> list[dict[str, str]]:
+    return list(csv.DictReader(io.StringIO(product_bytes.decode("utf-8"), newline="")))
 
 
 def _write_summary_workbook(

@@ -13,6 +13,7 @@ repositories:
       - ansible/inventory/localhost.ini
       - ansible/inventory/group_vars/all.yml
       - ansible/playbooks/run_synthetic_workflow.yml
+      - ansible/tasks/run_workflow_stage.yml
       - configs/run.synthetic.yaml
       - configs/expected_shape.required_extract.yaml
       - configs/expected_shape.ad_hoc_extract.yaml

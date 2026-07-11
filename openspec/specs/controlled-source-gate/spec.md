@@ -18,7 +18,7 @@ The system SHALL verify all configured required repositories before executing wo
 - **THEN** preflight fails before creating or executing workflow stages
 
 ### Requirement: Requested controlled source ref resolves to a commit
-The system SHALL resolve the requested controlled source ref, tag, or commit before execution and SHALL use that selected commit as the source of every declared controlled artifact identity and materialized byte.
+The system SHALL resolve the requested controlled source ref, tag, or commit before execution, admit the resolved commit identity, and SHALL use that admitted selected commit as the authoritative source of every declared controlled artifact identity and materialized byte even if the mutable ref or worktree changes later.
 
 #### Scenario: Controlled source ref does not resolve
 - **WHEN** `controlled_source_ref` cannot be resolved in the controlled source repository
@@ -153,6 +153,8 @@ The system SHALL require every configured consumed controlled input to be a regu
 #### Scenario: Controlled input identity is admitted
 - **WHEN** a configured input exists as a regular file in the selected commit
 - **THEN** admission records its repository-relative path, selected commit, Git blob ID, tracked mode, and SHA-256
+- **AND** admission records the role, source and destination categories, logical group, simulation area, materialization mode, destination path, and destination mode used downstream
+- **AND** pre-consumption verification rejects any mutable inventory disagreement with those admitted classifications
 
 #### Scenario: Materialized input changes before consumption
 - **WHEN** a materialized controlled input SHA-256 differs from its admitted identity immediately before payload launch
@@ -186,3 +188,4 @@ The system SHALL reject run identifiers and configured paths that can escape the
 #### Scenario: Materialization path escapes root
 - **WHEN** a configured source or destination path is absolute or resolves outside its controlled-source, simulation, or provenance root
 - **THEN** admission fails before workspace creation or file copying
+- **AND** each source is checked directly against the controlled-source root and each destination directly against its designated simulation or provenance root

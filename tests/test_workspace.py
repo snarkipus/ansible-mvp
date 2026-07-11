@@ -4,12 +4,14 @@ import hashlib
 import json
 import stat
 import subprocess
+from collections.abc import Callable, MutableMapping
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
 
-from provenance.cli import main
+from provenance.cli import main as _cli_main
 from provenance.scheduler import (
     collect_mock_lsf_accounting,
     submit_mock_lsf_job,
@@ -23,7 +25,74 @@ from provenance.stages import (
     run_required_extraction,
     run_synthetic_simulation,
 )
-from provenance.workspace import materialize_inputs, materialize_runtime_scripts, prepare_workspace
+from provenance.workspace import (
+    MaterializationResult,
+    prepare_workspace,
+    verify_materialization_evidence,
+)
+from provenance.workspace import (
+    materialize_inputs as _materialize_inputs,
+)
+from provenance.workspace import (
+    materialize_runtime_scripts as _materialize_runtime_scripts,
+)
+
+
+def _admit_materialization(
+    *, workspace_root: Path, run_id: str, controlled_source_repo: Path, controlled_source_ref: str
+) -> None:
+    path = workspace_root / "runs" / run_id / "provenance" / "preflight.json"
+    if path.is_file():
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "status": "pass",
+                "controlled_source_repo": {
+                    "path": controlled_source_repo.resolve().as_posix(),
+                    "ref": controlled_source_ref,
+                    "resolved_commit": _git(
+                        controlled_source_repo, "rev-parse", controlled_source_ref
+                    ),
+                    "head_commit": _git(controlled_source_repo, "rev-parse", "HEAD"),
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def materialize_inputs(**kwargs: Any) -> MaterializationResult:
+    _admit_materialization(
+        workspace_root=Path(kwargs["workspace_root"]),
+        run_id=str(kwargs["run_id"]),
+        controlled_source_repo=Path(kwargs["controlled_source_repo"]),
+        controlled_source_ref=str(kwargs["controlled_source_ref"]),
+    )
+    return _materialize_inputs(**kwargs)
+
+
+def materialize_runtime_scripts(**kwargs: Any) -> MaterializationResult:
+    _admit_materialization(
+        workspace_root=Path(kwargs["workspace_root"]),
+        run_id=str(kwargs["run_id"]),
+        controlled_source_repo=Path(kwargs["controlled_source_repo"]),
+        controlled_source_ref=str(kwargs["controlled_source_ref"]),
+    )
+    return _materialize_runtime_scripts(**kwargs)
+
+
+def main(argv: list[str]) -> int:
+    if argv and argv[0] in {"materialize-inputs", "materialize-procs"}:
+        values = dict(zip(argv[1::2], argv[2::2], strict=False))
+        _admit_materialization(
+            workspace_root=Path(values["--workspace-root"]),
+            run_id=values["--run-id"],
+            controlled_source_repo=Path(values["--controlled-source-repo"]),
+            controlled_source_ref=values["--controlled-source-ref"],
+        )
+    return _cli_main(argv)
 
 
 def _write_config(path: Path) -> None:
@@ -230,6 +299,7 @@ def _write_scheduler_state(path: Path, run_id: str, state: str) -> None:
 
 
 def _write_successful_scheduler_receipt(path: Path, run_id: str) -> None:
+    _write_preflight_admission(path, run_id)
     run_root = path / "runs" / run_id
     scheduler_root = run_root / "provenance" / "scheduler"
     logs_root = run_root / "provenance" / "logs"
@@ -248,6 +318,7 @@ def _write_successful_scheduler_receipt(path: Path, run_id: str) -> None:
         "receipt_id": receipt_id,
         "run_id": run_id,
         "scheduler": "mock_lsf",
+        "mode": "mock_lsf",
         "job_id": job_id,
         "state": "DONE",
         "exit_code": 0,
@@ -263,6 +334,20 @@ def _write_successful_scheduler_receipt(path: Path, run_id: str) -> None:
                 "run_id": run_id,
                 "job_id": job_id,
                 "scheduler": "mock_lsf",
+                "mode": "mock_lsf",
+                "metadata_path": f"runs/{run_id}/provenance/scheduler/submission.yaml",
+                "job_state_path": f"runs/{run_id}/provenance/scheduler/job-state.json",
+                "terminal_state_path": f"runs/{run_id}/provenance/scheduler/terminal-state.json",
+                "accounting_path": f"runs/{run_id}/provenance/scheduler/accounting.yaml",
+                "submission": {
+                    "run_id": run_id,
+                    "scheduler": "mock_lsf",
+                    "mode": "mock_lsf",
+                    "job_id": job_id,
+                    "receipt_id": receipt_id,
+                    "payload_command": "procs/run-script.sh",
+                    "submitted_at_utc": submitted_at,
+                },
             }
         ),
         encoding="utf-8",
@@ -274,6 +359,7 @@ def _write_successful_scheduler_receipt(path: Path, run_id: str) -> None:
             {
                 **state,
                 "accounted_at": accounted_at,
+                "job_state_path": f"runs/{run_id}/provenance/scheduler/job-state.json",
                 "payload_stage_evidence": payload_path,
             }
         ),
@@ -285,7 +371,11 @@ def _write_successful_scheduler_receipt(path: Path, run_id: str) -> None:
                 "receipt_id": receipt_id,
                 "run_id": run_id,
                 "job_id": job_id,
+                "scheduler": "mock_lsf",
+                "mode": "mock_lsf",
+                "evidence_path": payload_path,
                 "name": "run_simulation",
+                "command": "procs/run-script.sh",
                 "status": "pass",
                 "return_code": 0,
                 "started_at": started_at,
@@ -325,6 +415,41 @@ def _prepare_scheduler_payload(
         controlled_source_repo=controlled_repo,
         controlled_source_ref=controlled_source_ref,
     )
+    _write_preflight_admission(workspace_root, run_id)
+
+
+def _write_preflight_admission(workspace_root: Path, run_id: str) -> None:
+    inventories_root = workspace_root / "runs" / run_id / "provenance" / "inventories"
+    admitted = []
+    for inventory_name in ("materialized_inputs.json", "materialized_runtime_scripts.json"):
+        inventory_path = inventories_root / inventory_name
+        if not inventory_path.is_file():
+            continue
+        inventory = json.loads(inventory_path.read_text(encoding="utf-8"))
+        admitted.extend(
+            {
+                "selected_commit": artifact["source_resolved_commit"],
+                "relative_path": artifact["source_path"],
+                "blob_oid": artifact["source_blob_oid"],
+                "file_mode": artifact["source_file_mode"],
+                "sha256": artifact["source_sha256"],
+                "destination_path": artifact["destination_path"],
+                "destination_file_mode": artifact["destination_file_mode"],
+                "role": artifact["role"],
+                "materialization_mode": artifact["materialization_mode"],
+                "sim_area": artifact["sim_area"],
+                "logical_group": artifact["logical_group"],
+                "source_category": artifact["source_category"],
+                "destination_category": artifact["destination_category"],
+            }
+            for artifact in inventory["artifacts"]
+        )
+    preflight_path = inventories_root.parent / "preflight.json"
+    preflight = (
+        json.loads(preflight_path.read_text(encoding="utf-8")) if preflight_path.is_file() else {}
+    )
+    preflight["controlled_artifacts"] = admitted
+    preflight_path.write_text(json.dumps(preflight), encoding="utf-8")
 
 
 def test_prepare_workspace_creates_separated_simulation_and_provenance_dirs(
@@ -480,6 +605,296 @@ def test_materialize_inputs_copies_repeated_groups_and_records_hashes(tmp_path: 
     assert dir_c_ex3.logical_group == "dirC"
 
 
+def test_scheduler_receipt_normalizes_malformed_yaml_and_duplicate_raw_output(
+    tmp_path: Path,
+) -> None:
+    run_id = "receipt_normalization"
+    config_path = tmp_path / "run.synthetic.yaml"
+    _write_config(config_path)
+    prepare_workspace(config_path=config_path, run_id=run_id, workspace_root=tmp_path)
+    raw_output = tmp_path / "runs" / run_id / "sim-run-root/lists/dirC/sim-out.dat"
+    raw_output.parent.mkdir(parents=True)
+    raw_output.write_text("raw\n", encoding="utf-8")
+    _write_successful_scheduler_receipt(tmp_path, run_id)
+    payload_path = tmp_path / "runs" / run_id / "provenance/logs/run_simulation.stage.json"
+    payload = json.loads(payload_path.read_text(encoding="utf-8"))
+    payload["outputs"].append({**payload["outputs"][0], "sha256": "0" * 64})
+    payload_path.write_text(json.dumps(payload), encoding="utf-8")
+    duplicate = validate_scheduler_receipt(
+        config_path=config_path, run_id=run_id, workspace_root=tmp_path
+    )
+    assert duplicate["status"] == "fail"
+    assert "exactly once; found 2 rows" in "; ".join(duplicate["errors"])
+
+    submission = tmp_path / "runs" / run_id / "provenance/scheduler/submission.yaml"
+    submission.write_text("submission: [unterminated", encoding="utf-8")
+    malformed = validate_scheduler_receipt(
+        config_path=config_path, run_id=run_id, workspace_root=tmp_path
+    )
+    assert malformed["status"] == "fail"
+    assert "submission: YAML evidence is unreadable or malformed" in "; ".join(malformed["errors"])
+
+
+@pytest.mark.parametrize(
+    ("field", "escaped_value", "error_field"),
+    [
+        ("source_root", "../outside", "materialization.inputs source path"),
+        ("source_root", "/outside", "materialization.inputs source path"),
+        ("destination_root", "../outside", "materialization.inputs destination path"),
+        ("destination_root", "/outside", "materialization.inputs destination path"),
+    ],
+)
+def test_materialize_inputs_enforces_source_and_destination_roots_before_writing(
+    tmp_path: Path, field: str, escaped_value: str, error_field: str
+) -> None:
+    config_path = tmp_path / "run.synthetic.yaml"
+    controlled_repo = _create_controlled_source_repo(tmp_path / "controlled-source-demo")
+    _write_config(config_path)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["materialization"]["inputs"][field] = escaped_value
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+
+    with pytest.raises(ValueError, match=error_field):
+        materialize_inputs(
+            config_path=config_path,
+            run_id="escaped_inputs",
+            workspace_root=tmp_path,
+            controlled_source_repo=controlled_repo,
+            controlled_source_ref="controlled-source-demo-v0.1.2",
+        )
+
+    assert not (tmp_path / "outside").exists()
+    assert not (tmp_path / "runs/escaped_inputs/sim-run-root").exists()
+
+
+@pytest.mark.parametrize(
+    ("field", "escaped_value", "error_field"),
+    [
+        ("relative_path", "../outside.sh", "controlled_scripts.run_script.relative_path"),
+        ("relative_path", "/outside.sh", "controlled_scripts.run_script.relative_path"),
+        ("materialized_path", "../outside.sh", "controlled_scripts.run_script.materialized_path"),
+        ("materialized_path", "/outside.sh", "controlled_scripts.run_script.materialized_path"),
+    ],
+)
+def test_materialize_runtime_scripts_enforces_source_and_destination_roots_before_writing(
+    tmp_path: Path, field: str, escaped_value: str, error_field: str
+) -> None:
+    config_path = tmp_path / "run.synthetic.yaml"
+    controlled_repo = _create_controlled_source_repo(tmp_path / "controlled-source-demo")
+    _write_config(config_path)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["controlled_scripts"]["run_script"][field] = escaped_value
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+
+    with pytest.raises(ValueError, match=error_field):
+        materialize_runtime_scripts(
+            config_path=config_path,
+            run_id="escaped_scripts",
+            workspace_root=tmp_path,
+            controlled_source_repo=controlled_repo,
+            controlled_source_ref="controlled-source-demo-v0.1.2",
+        )
+
+    assert not (tmp_path / "outside.sh").exists()
+    assert not (tmp_path / "runs/escaped_scripts/sim-run-root").exists()
+
+
+@pytest.mark.parametrize(
+    ("operation", "script_name", "wrong_destination", "error_field"),
+    [
+        ("inputs", None, "sim-run-root/files", "materialization.inputs destination path"),
+        (
+            "procs",
+            "run_script",
+            "sim-run-root/input/run-script.sh",
+            "controlled_scripts.run_script.materialized_path",
+        ),
+        (
+            "procs",
+            "synthetic_sim_engine",
+            "sim-run-root/procs/synthetic_sim_engine.sh",
+            "controlled_scripts.synthetic_sim_engine.materialized_path",
+        ),
+    ],
+)
+def test_direct_materialization_rejects_destination_outside_declared_area(
+    tmp_path: Path,
+    operation: str,
+    script_name: str | None,
+    wrong_destination: str,
+    error_field: str,
+) -> None:
+    config_path = tmp_path / "run.synthetic.yaml"
+    controlled_repo = _create_controlled_source_repo(tmp_path / "controlled-source-demo")
+    _write_config(config_path)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    if script_name is None:
+        config["materialization"]["inputs"]["destination_root"] = wrong_destination
+        materialize = materialize_inputs
+    else:
+        config["materialization"]["runtime_scripts"] = [script_name]
+        config["controlled_scripts"][script_name]["materialized_path"] = wrong_destination
+        materialize = materialize_runtime_scripts
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+
+    with pytest.raises(ValueError, match=error_field):
+        materialize(
+            config_path=config_path,
+            run_id="wrong_area_direct",
+            workspace_root=tmp_path,
+            controlled_source_repo=controlled_repo,
+            controlled_source_ref="controlled-source-demo-v0.1.2",
+        )
+
+    assert not (tmp_path / "runs/wrong_area_direct/sim-run-root").exists()
+
+
+@pytest.mark.parametrize(
+    ("operation", "script_name", "wrong_destination"),
+    [
+        ("materialize-inputs", None, "sim-run-root/lists"),
+        ("materialize-procs", "run_script", "provenance/controlled-source/run-script.sh"),
+        ("materialize-procs", "extract_required", "sim-run-root/procs/extract_required.pl"),
+    ],
+)
+def test_cli_materialization_rejects_destination_outside_declared_area(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    operation: str,
+    script_name: str | None,
+    wrong_destination: str,
+) -> None:
+    config_path = tmp_path / "run.synthetic.yaml"
+    controlled_repo = _create_controlled_source_repo(tmp_path / "controlled-source-demo")
+    _write_config(config_path)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    if script_name is None:
+        config["materialization"]["inputs"]["destination_root"] = wrong_destination
+    else:
+        config["materialization"]["runtime_scripts"] = [script_name]
+        config["controlled_scripts"][script_name]["materialized_path"] = wrong_destination
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+
+    with pytest.raises(SystemExit, match="2"):
+        main(
+            [
+                operation,
+                "--config",
+                str(config_path),
+                "--run-id",
+                "wrong_area_cli",
+                "--workspace-root",
+                str(tmp_path),
+                "--controlled-source-repo",
+                str(controlled_repo),
+                "--controlled-source-ref",
+                "controlled-source-demo-v0.1.2",
+            ]
+        )
+
+    assert "must be under its designated area" in capsys.readouterr().err
+    assert not (tmp_path / "runs/wrong_area_cli/sim-run-root").exists()
+
+
+@pytest.mark.parametrize(
+    ("operation", "field", "configured_section"),
+    [
+        ("materialize-inputs", "source_root", ("materialization", "inputs")),
+        ("materialize-inputs", "destination_root", ("materialization", "inputs")),
+        ("materialize-procs", "relative_path", ("controlled_scripts", "run_script")),
+        ("materialize-procs", "materialized_path", ("controlled_scripts", "run_script")),
+    ],
+)
+def test_cli_materialization_rejects_direct_path_escapes(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    operation: str,
+    field: str,
+    configured_section: tuple[str, str],
+) -> None:
+    config_path = tmp_path / "run.synthetic.yaml"
+    controlled_repo = _create_controlled_source_repo(tmp_path / "controlled-source-demo")
+    _write_config(config_path)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config[configured_section[0]][configured_section[1]][field] = (
+        "/outside" if field in {"source_root", "relative_path"} else "../outside"
+    )
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+
+    with pytest.raises(SystemExit, match="2"):
+        main(
+            [
+                operation,
+                "--config",
+                str(config_path),
+                "--run-id",
+                "cli_escape",
+                "--workspace-root",
+                str(tmp_path),
+                "--controlled-source-repo",
+                str(controlled_repo),
+                "--controlled-source-ref",
+                "controlled-source-demo-v0.1.2",
+            ]
+        )
+
+    assert "must be a relative path without '..'" in capsys.readouterr().err
+    assert not (tmp_path / "outside").exists()
+    assert not (tmp_path / "runs/cli_escape/sim-run-root/input").exists()
+    assert not (tmp_path / "runs/cli_escape/sim-run-root/procs").exists()
+
+
+@pytest.mark.parametrize("operation", ["inputs", "procs"])
+@pytest.mark.parametrize("path_role", ["source", "destination"])
+def test_direct_materialization_rejects_symlink_root_escape(
+    tmp_path: Path, operation: str, path_role: str
+) -> None:
+    run_id = f"symlink_{operation}_{path_role}"
+    config_path = tmp_path / "run.synthetic.yaml"
+    controlled_repo = _create_controlled_source_repo(tmp_path / "controlled-source-demo")
+    _write_config(config_path)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    outside = tmp_path / "outside"
+    outside.mkdir()
+
+    if operation == "inputs":
+        section = config["materialization"]["inputs"]
+        field = "source_root" if path_role == "source" else "destination_root"
+    else:
+        section = config["controlled_scripts"]["run_script"]
+        field = "relative_path" if path_role == "source" else "materialized_path"
+    section[field] = "escape-link"
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+
+    link_root = controlled_repo if path_role == "source" else tmp_path / "runs" / run_id
+    link_root.mkdir(parents=True, exist_ok=True)
+    (link_root / "escape-link").symlink_to(outside)
+    if path_role == "source":
+        _git(controlled_repo, "add", "escape-link")
+        _git(
+            controlled_repo,
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.invalid",
+            "commit",
+            "-m",
+            "add escape symlink",
+        )
+
+    materialize = materialize_inputs if operation == "inputs" else materialize_runtime_scripts
+    with pytest.raises(ValueError, match="resolves outside its designated root"):
+        materialize(
+            config_path=config_path,
+            run_id=run_id,
+            workspace_root=tmp_path,
+            controlled_source_repo=controlled_repo,
+            controlled_source_ref="controlled-source-demo-v0.1.2",
+        )
+
+    assert not any(outside.iterdir())
+
+
 def test_materialization_uses_selected_ref_when_clean_head_differs(tmp_path: Path) -> None:
     config_path = tmp_path / "run.synthetic.yaml"
     controlled_repo = _create_controlled_source_repo(tmp_path / "controlled-source-demo")
@@ -526,6 +941,45 @@ def test_materialization_uses_selected_ref_when_clean_head_differs(tmp_path: Pat
     assert (
         tmp_path / "runs/selected_ref/provenance/controlled-source/scripts/synthetic_sim_engine.sh"
     ).read_bytes() == selected_engine
+
+
+def test_materialization_uses_admitted_commit_after_tag_moves(tmp_path: Path) -> None:
+    config_path = tmp_path / "run.synthetic.yaml"
+    controlled_repo = _create_controlled_source_repo(tmp_path / "controlled-source-demo")
+    _write_config(config_path)
+    prepare_workspace(config_path=config_path, run_id="moved_tag", workspace_root=tmp_path)
+    admitted_bytes = (controlled_repo / "fixtures/controlled_inputs/dirA/ex1.dat").read_bytes()
+    _admit_materialization(
+        workspace_root=tmp_path,
+        run_id="moved_tag",
+        controlled_source_repo=controlled_repo,
+        controlled_source_ref="controlled-source-demo-v0.1.2",
+    )
+    source = controlled_repo / "fixtures/controlled_inputs/dirA/ex1.dat"
+    source.write_text("replacement commit bytes\n", encoding="utf-8")
+    _git(controlled_repo, "add", source.relative_to(controlled_repo).as_posix())
+    _git(
+        controlled_repo,
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.invalid",
+        "commit",
+        "-m",
+        "move selected tag",
+    )
+    _git(controlled_repo, "tag", "-f", "controlled-source-demo-v0.1.2")
+
+    _materialize_inputs(
+        config_path=config_path,
+        run_id="moved_tag",
+        workspace_root=tmp_path,
+        controlled_source_repo=controlled_repo,
+        controlled_source_ref="controlled-source-demo-v0.1.2",
+    )
+    assert (
+        tmp_path / "runs/moved_tag/sim-run-root/input/dirA/ex1.dat"
+    ).read_bytes() == admitted_bytes
 
 
 def test_cli_materialize_procs_copies_runtime_script_and_writes_evidence(tmp_path: Path) -> None:
@@ -580,6 +1034,12 @@ def test_cli_materialize_procs_copies_runtime_script_and_writes_evidence(tmp_pat
     assert artifact["destination_file_mode"] == "0555"
     assert stat.S_IMODE(script.stat().st_mode) == 0o555
 
+    # Inventory selection is anchored to admitted destination identity rather
+    # than this mutable classification field.
+    for item in evidence["artifacts"]:
+        item["role"] = "input"
+    output_path.write_text(json.dumps(evidence), encoding="utf-8")
+
     assert (
         main(
             [
@@ -598,7 +1058,15 @@ def test_cli_materialize_procs_copies_runtime_script_and_writes_evidence(tmp_pat
         ).read_text(encoding="utf-8")
     )
     assert len(controlled_inventory) == 4
-    assert sum(item["role"] == "controlled_code" for item in controlled_inventory) == 3
+    assert {
+        item.get("source_path", item.get("materialization", {}).get("source_path"))
+        for item in controlled_inventory
+    } == {
+        "procs/run-script.sh",
+        "scripts/synthetic_sim_engine.sh",
+        "scripts/extract_required.pl",
+        "scripts/ad_hoc_extract.py",
+    }
 
 
 @pytest.mark.parametrize(
@@ -641,6 +1109,214 @@ def test_scheduler_rejects_tampered_materialized_closure(
         encoding="utf-8"
     )
     assert "materialized artifact integrity mismatch" in stderr
+
+
+@pytest.mark.parametrize(
+    ("relative_path", "role"),
+    [
+        ("sim-run-root/input/dirA/ex1.dat", "input"),
+        (
+            "provenance/controlled-source/scripts/synthetic_sim_engine.sh",
+            "controlled_code",
+        ),
+        ("sim-run-root/procs/run-script.sh", "runtime_script"),
+    ],
+)
+@pytest.mark.parametrize(
+    ("rewrite_destination", "expected_error"),
+    [
+        (False, "inventory disagrees with preflight admission"),
+        (True, "must cover every applicable preflight-admitted artifact exactly once"),
+    ],
+)
+def test_scheduler_rejects_inventory_rewritten_to_match_tampered_executable(
+    tmp_path: Path,
+    relative_path: str,
+    role: str,
+    rewrite_destination: bool,
+    expected_error: str,
+) -> None:
+    config_path = tmp_path / "run.synthetic.yaml"
+    controlled_repo = _create_controlled_source_repo(tmp_path / "controlled-source-demo")
+    _write_config(config_path)
+    run_id = "tampered_inventory"
+    _prepare_scheduler_payload(
+        config_path=config_path,
+        run_id=run_id,
+        workspace_root=tmp_path,
+        controlled_repo=controlled_repo,
+    )
+    target = tmp_path / "runs" / run_id / relative_path
+    target.chmod(0o755)
+    target.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    forged_hash = hashlib.sha256(target.read_bytes()).hexdigest()
+    inventory_name = (
+        "materialized_inputs.json" if role == "input" else "materialized_runtime_scripts.json"
+    )
+    inventory_path = tmp_path / "runs" / run_id / "provenance/inventories" / inventory_name
+    inventory = json.loads(inventory_path.read_text(encoding="utf-8"))
+    artifact = next(
+        item
+        for item in inventory["artifacts"]
+        if item["role"] == role and item["destination_path"].endswith(relative_path)
+    )
+    artifact["source_sha256"] = forged_hash
+    artifact["sha256"] = forged_hash
+    artifact["destination_file_mode"] = "0755"
+    if rewrite_destination:
+        forged_destination = target.with_name("forged-run-script.sh")
+        forged_destination.write_bytes(target.read_bytes())
+        forged_destination.chmod(0o755)
+        artifact["destination_path"] = forged_destination.relative_to(tmp_path).as_posix()
+    inventory_path.write_text(json.dumps(inventory), encoding="utf-8")
+
+    submit_mock_lsf_job(
+        config_path=config_path,
+        run_id=run_id,
+        workspace_root=tmp_path,
+        controlled_source_repo=controlled_repo,
+    )
+    terminal = wait_mock_lsf_job(config_path=config_path, run_id=run_id, workspace_root=tmp_path)
+
+    assert terminal["state"] == "EXIT"
+    stderr = (tmp_path / "runs" / run_id / "provenance/scheduler/stderr.log").read_text()
+    assert expected_error in stderr
+
+
+def test_integrity_verification_stays_bound_to_admitted_commit_after_repository_moves(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "run.synthetic.yaml"
+    controlled_repo = _create_controlled_source_repo(tmp_path / "controlled-source-demo")
+    _write_config(config_path)
+    run_id = "moved_repository"
+    _prepare_scheduler_payload(
+        config_path=config_path,
+        run_id=run_id,
+        workspace_root=tmp_path,
+        controlled_repo=controlled_repo,
+    )
+    target = tmp_path / "runs" / run_id / "sim-run-root/input/dirA/ex1.dat"
+    source = controlled_repo / "fixtures/controlled_inputs/dirA/ex1.dat"
+    source.write_text("new commit bytes\n", encoding="utf-8")
+    _git(controlled_repo, "add", source.relative_to(controlled_repo).as_posix())
+    _git(
+        controlled_repo,
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.invalid",
+        "commit",
+        "-m",
+        "move head after admission",
+    )
+    _git(controlled_repo, "tag", "-f", "controlled-source-demo-v0.1.2")
+    source.write_text("uncommitted worktree bytes\n", encoding="utf-8")
+    target.chmod(0o644)
+    target.write_text("new commit bytes\n", encoding="utf-8")
+    inventory_path = tmp_path / "runs" / run_id / "provenance/inventories/materialized_inputs.json"
+    inventory = json.loads(inventory_path.read_text(encoding="utf-8"))
+    artifact = next(
+        item for item in inventory["artifacts"] if item["destination_path"].endswith("dirA/ex1.dat")
+    )
+    new_identity = subprocess.run(
+        ["git", "-C", str(controlled_repo), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    artifact["source_resolved_commit"] = new_identity
+    artifact["source_blob_oid"] = _git(
+        controlled_repo, "rev-parse", "HEAD:fixtures/controlled_inputs/dirA/ex1.dat"
+    )
+    artifact["source_sha256"] = hashlib.sha256(target.read_bytes()).hexdigest()
+    artifact["sha256"] = artifact["source_sha256"]
+    artifact["destination_file_mode"] = "0644"
+    inventory_path.write_text(json.dumps(inventory), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="inventory disagrees with preflight admission.*commit"):
+        verify_materialization_evidence(
+            inventory_path,
+            workspace_root=tmp_path,
+            controlled_source_repo=controlled_repo,
+        )
+
+
+@pytest.mark.parametrize("mutation", ["empty", "omitted", "duplicate", "swapped"])
+def test_materialization_verification_requires_each_admitted_artifact_exactly_once(
+    tmp_path: Path, mutation: str
+) -> None:
+    config_path = tmp_path / "run.synthetic.yaml"
+    controlled_repo = _create_controlled_source_repo(tmp_path / "controlled-source-demo")
+    _write_config(config_path)
+    run_id = "complete_materialization"
+    _prepare_scheduler_payload(
+        config_path=config_path,
+        run_id=run_id,
+        workspace_root=tmp_path,
+        controlled_repo=controlled_repo,
+    )
+    inventories = tmp_path / "runs" / run_id / "provenance/inventories"
+    inventory_path = inventories / "materialized_inputs.json"
+    inventory = json.loads(inventory_path.read_text(encoding="utf-8"))
+    artifacts = inventory["artifacts"]
+    if mutation == "empty":
+        inventory["artifacts"] = []
+    elif mutation == "omitted":
+        inventory["artifacts"] = artifacts[1:]
+    elif mutation == "duplicate":
+        inventory["artifacts"] = [*artifacts, artifacts[0].copy()]
+    else:
+        runtime = json.loads(
+            (inventories / "materialized_runtime_scripts.json").read_text(encoding="utf-8")
+        )
+        inventory["artifacts"][0] = runtime["artifacts"][0]
+    inventory_path.write_text(json.dumps(inventory), encoding="utf-8")
+
+    expected = "duplicate destination rows" if mutation == "duplicate" else "must cover every"
+    with pytest.raises(ValueError, match=expected):
+        verify_materialization_evidence(
+            inventory_path,
+            workspace_root=tmp_path,
+            controlled_source_repo=controlled_repo,
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "replacement"),
+    [
+        ("role", "controlled_code"),
+        ("source_category", "uncontrolled_input"),
+        ("destination_category", "controlled_code"),
+        ("logical_group", "dirB"),
+        ("sim_area", "files"),
+        ("materialization_mode", "mutable_copy"),
+    ],
+)
+def test_materialization_verification_rejects_mutable_classification(
+    tmp_path: Path, field: str, replacement: str
+) -> None:
+    config_path = tmp_path / "run.synthetic.yaml"
+    controlled_repo = _create_controlled_source_repo(tmp_path / "controlled-source-demo")
+    _write_config(config_path)
+    run_id = "classification_binding"
+    _prepare_scheduler_payload(
+        config_path=config_path,
+        run_id=run_id,
+        workspace_root=tmp_path,
+        controlled_repo=controlled_repo,
+    )
+    inventory_path = tmp_path / "runs" / run_id / "provenance/inventories/materialized_inputs.json"
+    inventory = json.loads(inventory_path.read_text(encoding="utf-8"))
+    inventory["artifacts"][0][field] = replacement
+    inventory_path.write_text(json.dumps(inventory), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="must cover every|disagrees with preflight admission"):
+        verify_materialization_evidence(
+            inventory_path,
+            workspace_root=tmp_path,
+            controlled_source_repo=controlled_repo,
+        )
 
 
 def test_write_mock_lsf_metadata_records_absent_lsf_tools_without_failing(
@@ -725,6 +1401,9 @@ def test_cli_submit_mock_lsf_writes_scheduler_yaml(tmp_path: Path) -> None:
     )
 
     metadata = yaml.safe_load(output_path.read_text(encoding="utf-8"))
+    assert metadata["submission"]["run_id"] == "demo_006"
+    assert metadata["submission"]["scheduler"] == metadata["scheduler"] == "mock_lsf"
+    assert metadata["submission"]["mode"] == metadata["mode"] == "mock_lsf"
     assert metadata["submission"]["job_id"] == "mock-demo_006"
     assert metadata["submission"]["command"] == "make submit-mock-lsf"
     assert metadata["provenance_root"] == "runs/demo_006/provenance"
@@ -792,7 +1471,10 @@ def test_mock_lsf_submit_wait_and_collect_use_wrapper_terminal_state(tmp_path: P
         ("timestamp_order", "timestamps are not monotonic"),
         ("nonzero_done", "terminal state must be DONE with zero exit_code"),
         ("failed_payload", "payload stage evidence must pass"),
-        ("accounting_link", "accounting payload-stage linkage is inconsistent"),
+        ("accounting_link", "accounting.payload_stage_evidence must link"),
+        ("scheduler_mode", "payload mode does not match configured scheduler mode"),
+        ("timestamp_disagreement", "duplicated started_at values do not agree"),
+        ("malformed_timestamp", "started_at is missing or invalid"),
         ("raw_hash", "raw output hash does not match"),
     ],
 )
@@ -833,11 +1515,35 @@ def test_scheduler_receipt_rejects_inconsistent_components(
         else:
             accounting["payload_stage_evidence"] = "stale-payload.json"
         accounting_path.write_text(yaml.safe_dump(accounting), encoding="utf-8")
-    elif case == "failed_payload":
+    elif case in {
+        "failed_payload",
+        "scheduler_mode",
+        "timestamp_disagreement",
+        "malformed_timestamp",
+    }:
         payload_path = logs_root / "run_simulation.stage.json"
         payload = json.loads(payload_path.read_text(encoding="utf-8"))
-        payload["status"] = "fail"
-        payload["return_code"] = 1
+        if case == "failed_payload":
+            payload["status"] = "fail"
+            payload["return_code"] = 1
+        elif case == "scheduler_mode":
+            payload["mode"] = "real_lsf"
+        elif case == "timestamp_disagreement":
+            payload["started_at"] = "2026-01-01T00:00:01.5Z"
+        else:
+            payload["started_at"] = "not-a-timestamp"
+            state_path = scheduler_root / "job-state.json"
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            state["started_at"] = "not-a-timestamp"
+            state_path.write_text(json.dumps(state), encoding="utf-8")
+            terminal_path = scheduler_root / "terminal-state.json"
+            terminal = json.loads(terminal_path.read_text(encoding="utf-8"))
+            terminal["started_at"] = "not-a-timestamp"
+            terminal_path.write_text(json.dumps(terminal), encoding="utf-8")
+            accounting_path = scheduler_root / "accounting.yaml"
+            accounting = yaml.safe_load(accounting_path.read_text(encoding="utf-8"))
+            accounting["started_at"] = "not-a-timestamp"
+            accounting_path.write_text(yaml.safe_dump(accounting), encoding="utf-8")
         payload_path.write_text(json.dumps(payload), encoding="utf-8")
     else:
         raw_output.write_text("changed after payload\n", encoding="utf-8")
@@ -850,6 +1556,274 @@ def test_scheduler_receipt_rejects_inconsistent_components(
 
     assert receipt["status"] == "fail"
     assert expected_error in "; ".join(receipt["errors"])
+
+
+@pytest.mark.parametrize(
+    ("component", "field", "bad_value", "expected_error"),
+    [
+        *[
+            (component, field, bad_value, f"{component} {field}")
+            for component in ("submission", "job_state", "terminal_state", "accounting", "payload")
+            for field, bad_value in (
+                ("receipt_id", "stale-receipt"),
+                ("run_id", "stale-run"),
+                ("job_id", "stale-job"),
+                ("scheduler", "stale-scheduler"),
+            )
+        ],
+        (
+            "submission",
+            "submission.submitted_at_utc",
+            "not-a-time",
+            "submitted_at is missing or invalid",
+        ),
+        ("job_state", "started_at", "2026-01-01T00:00:01", "started_at is missing or invalid"),
+        ("accounting", "accounted_at", "not-a-time", "accounted_at is missing or invalid"),
+        (
+            "submission",
+            "submission.submitted_at_utc",
+            "2026-01-01T00:00:00.5Z",
+            "duplicated submitted_at values do not agree",
+        ),
+        (
+            "terminal_state",
+            "started_at",
+            "2026-01-01T00:00:01.5Z",
+            "duplicated started_at values do not agree",
+        ),
+        (
+            "payload",
+            "finished_at",
+            "2026-01-01T00:00:02.5Z",
+            "duplicated finished_at values do not agree",
+        ),
+        ("all", "submitted_at", "2026-01-01T00:00:02Z", "timestamps are not monotonic"),
+        ("all", "started_at", "2025-12-31T23:59:59Z", "timestamps are not monotonic"),
+        ("all", "finished_at", "2025-12-31T23:59:58Z", "timestamps are not monotonic"),
+        ("accounting", "accounted_at", "2025-12-31T23:59:57Z", "timestamps are not monotonic"),
+        ("job_state", "exit_code", 7, "normalized job state must be DONE with zero exit_code"),
+        ("terminal_state", "exit_code", 7, "terminal state must be DONE with zero exit_code"),
+        ("accounting", "exit_code", 7, "accounting must record DONE with zero exit_code"),
+        ("payload", "status", "fail", "payload stage evidence must pass with zero return_code"),
+        ("payload", "return_code", 7, "payload stage evidence must pass with zero return_code"),
+        ("payload", "name", "other_stage", "payload name does not match configured payload_stage"),
+        (
+            "payload",
+            "command",
+            "procs/other.sh",
+            "payload command does not match configured controlled payload command",
+        ),
+        (
+            "submission",
+            "submission.run_id",
+            "stale-run",
+            "submission.submission.run_id does not match top-level identity",
+        ),
+        (
+            "submission",
+            "submission.scheduler",
+            "real_lsf",
+            "submission.submission.scheduler does not match top-level identity",
+        ),
+        (
+            "submission",
+            "submission.mode",
+            "real_lsf",
+            "submission.submission.mode does not match top-level identity",
+        ),
+        (
+            "submission",
+            "submission.run_id",
+            None,
+            "submission.submission.run_id does not match top-level identity",
+        ),
+        (
+            "submission",
+            "submission.scheduler",
+            None,
+            "submission.submission.scheduler does not match top-level identity",
+        ),
+        (
+            "submission",
+            "submission.mode",
+            None,
+            "submission.submission.mode does not match top-level identity",
+        ),
+        (
+            "submission",
+            "submission.job_id",
+            "stale-job",
+            "submission.submission.job_id does not match top-level identity",
+        ),
+        (
+            "submission",
+            "submission.receipt_id",
+            "stale-receipt",
+            "submission.submission.receipt_id does not match top-level identity",
+        ),
+        (
+            "submission",
+            "submission.payload_command",
+            "procs/other.sh",
+            "submission.submission.payload_command does not match configured payload command",
+        ),
+        (
+            "job_state",
+            "payload_stage_evidence",
+            "stale-payload.json",
+            "job_state.payload_stage_evidence must link",
+        ),
+        (
+            "terminal_state",
+            "payload_stage_evidence",
+            "stale-payload.json",
+            "terminal_state.payload_stage_evidence must link",
+        ),
+        (
+            "accounting",
+            "payload_stage_evidence",
+            "stale-payload.json",
+            "accounting.payload_stage_evidence must link",
+        ),
+        ("payload", "evidence_path", "stale-payload.json", "payload.evidence_path must link"),
+        ("accounting", "job_state_path", "stale-job.json", "accounting.job_state_path must link"),
+        (
+            "submission",
+            "accounting_path",
+            "stale-accounting.yaml",
+            "submission.accounting_path must link",
+        ),
+        ("submission", "job_state_path", "stale-job.json", "submission.job_state_path must link"),
+        (
+            "submission",
+            "terminal_state_path",
+            "stale-terminal.json",
+            "submission.terminal_state_path must link",
+        ),
+        ("payload", "outputs.0.sha256", None, "raw output hash does not match payload evidence"),
+        (
+            "payload",
+            "outputs.0.sha256",
+            "0" * 64,
+            "raw output hash does not match payload evidence",
+        ),
+        ("payload", "outputs", [], "payload output evidence must contain"),
+    ],
+)
+def test_scheduler_receipt_negative_coherence_matrix(
+    tmp_path: Path,
+    component: str,
+    field: str,
+    bad_value: object,
+    expected_error: str,
+) -> None:
+    """Every scheduler component is independently untrusted until cross-checked."""
+    run_id = "receipt_matrix"
+    config_path = tmp_path / "run.synthetic.yaml"
+    _write_config(config_path)
+    prepare_workspace(config_path=config_path, run_id=run_id, workspace_root=tmp_path)
+    raw_output = tmp_path / "runs" / run_id / "sim-run-root/lists/dirC/sim-out.dat"
+    raw_output.parent.mkdir(parents=True)
+    raw_output.write_text(
+        "logical_group,example,bytes,sha256_prefix\ndirC,ex1.dat,13,7fee469deaea\n",
+        encoding="utf-8",
+    )
+    _write_successful_scheduler_receipt(tmp_path, run_id)
+    scheduler_root = tmp_path / "runs" / run_id / "provenance/scheduler"
+    paths = {
+        "submission": scheduler_root / "submission.yaml",
+        "job_state": scheduler_root / "job-state.json",
+        "terminal_state": scheduler_root / "terminal-state.json",
+        "accounting": scheduler_root / "accounting.yaml",
+        "payload": tmp_path / "runs" / run_id / "provenance/logs/run_simulation.stage.json",
+    }
+
+    def update(name: str, dotted_field: str, value: object) -> None:
+        path = paths[name]
+        record = yaml.safe_load(path.read_text(encoding="utf-8"))
+        target: MutableMapping[str, object] | list[object] = record
+        parts = dotted_field.split(".")
+        for part in parts[:-1]:
+            child = target[int(part)] if isinstance(target, list) else target[part]
+            assert isinstance(child, (dict, list))
+            target = child
+        if isinstance(target, list):
+            target[int(parts[-1])] = value
+        else:
+            target[parts[-1]] = value
+        path.write_text(
+            yaml.safe_dump(record) if path.suffix in {".yaml", ".yml"} else json.dumps(record),
+            encoding="utf-8",
+        )
+
+    if component == "all":
+        timestamp_components = {
+            "submitted_at": (
+                ("submission", "submission.submitted_at_utc"),
+                ("job_state", "submitted_at"),
+                ("terminal_state", "submitted_at"),
+                ("accounting", "submitted_at"),
+            ),
+            "started_at": (
+                ("job_state", "started_at"),
+                ("terminal_state", "started_at"),
+                ("accounting", "started_at"),
+                ("payload", "started_at"),
+            ),
+            "finished_at": (
+                ("job_state", "finished_at"),
+                ("terminal_state", "finished_at"),
+                ("accounting", "finished_at"),
+                ("payload", "finished_at"),
+            ),
+        }
+        for name, timestamp_field in timestamp_components[field]:
+            update(name, timestamp_field, bad_value)
+    else:
+        update(component, field, bad_value)
+
+    receipt = validate_scheduler_receipt(
+        config_path=config_path, run_id=run_id, workspace_root=tmp_path
+    )
+    assert receipt["status"] == "fail"
+    errors = "; ".join(receipt["errors"])
+    if component == "submission" and field == "receipt_id":
+        assert "job_state receipt_id does not match submission" in errors
+    else:
+        assert expected_error in errors
+
+
+@pytest.mark.parametrize(
+    "component",
+    ["submission", "job_state", "terminal_state", "accounting", "payload", "raw_output"],
+)
+def test_scheduler_receipt_requires_every_component(tmp_path: Path, component: str) -> None:
+    run_id = "receipt_missing"
+    config_path = tmp_path / "run.synthetic.yaml"
+    _write_config(config_path)
+    prepare_workspace(config_path=config_path, run_id=run_id, workspace_root=tmp_path)
+    raw_output = tmp_path / "runs" / run_id / "sim-run-root/lists/dirC/sim-out.dat"
+    raw_output.parent.mkdir(parents=True)
+    raw_output.write_text("raw\n", encoding="utf-8")
+    _write_successful_scheduler_receipt(tmp_path, run_id)
+    paths = {
+        "submission": tmp_path / "runs" / run_id / "provenance/scheduler/submission.yaml",
+        "job_state": tmp_path / "runs" / run_id / "provenance/scheduler/job-state.json",
+        "terminal_state": tmp_path / "runs" / run_id / "provenance/scheduler/terminal-state.json",
+        "accounting": tmp_path / "runs" / run_id / "provenance/scheduler/accounting.yaml",
+        "payload": tmp_path / "runs" / run_id / "provenance/logs/run_simulation.stage.json",
+        "raw_output": raw_output,
+    }
+    paths[component].unlink()
+
+    receipt = validate_scheduler_receipt(
+        config_path=config_path, run_id=run_id, workspace_root=tmp_path
+    )
+    assert receipt["status"] == "fail"
+    if component == "raw_output":
+        assert any("raw output is missing" in error for error in receipt["errors"])
+    else:
+        assert any(error.startswith(f"{component}:") for error in receipt["errors"])
 
 
 def test_mock_lsf_wait_timeout_records_failed_evidence(tmp_path: Path) -> None:
@@ -1261,7 +2235,129 @@ def test_required_extraction_rejects_failed_scheduler_terminal_state(tmp_path: P
         raise AssertionError("extraction should reject non-DONE scheduler terminal state")
 
 
-def test_extraction_rejects_tampered_run_local_extractor(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("runner", "product_name", "stage_name"),
+    [
+        (run_required_extraction, "required.csv", "extract_required"),
+        (run_ad_hoc_extraction, "ad_hoc.csv", "extract_ad_hoc"),
+    ],
+)
+def test_extraction_recomputes_receipt_and_persists_mismatch_before_launch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    runner: Callable[..., object],
+    product_name: str,
+    stage_name: str,
+) -> None:
+    config_path = tmp_path / "run.synthetic.yaml"
+    controlled_repo = _create_controlled_source_repo(tmp_path / "controlled-source-demo")
+    _write_config(config_path)
+    run_id = f"fresh_receipt_{product_name.removesuffix('.csv')}"
+    prepare_workspace(config_path=config_path, run_id=run_id, workspace_root=tmp_path)
+    materialize_runtime_scripts(
+        config_path=config_path,
+        run_id=run_id,
+        workspace_root=tmp_path,
+        controlled_source_repo=controlled_repo,
+        controlled_source_ref="controlled-source-demo-v0.1.2",
+    )
+    raw_output = tmp_path / "runs" / run_id / "sim-run-root/lists/dirC/sim-out.dat"
+    raw_output.parent.mkdir(parents=True)
+    raw_output.write_text(
+        "logical_group,example,bytes,sha256_prefix\ndirC,ex1.dat,13,7fee469deaea\n",
+        encoding="utf-8",
+    )
+    _write_successful_scheduler_receipt(tmp_path, run_id)
+    receipt_path = tmp_path / "runs" / run_id / "provenance/validations/scheduler_receipt.json"
+    receipt_path.parent.mkdir(parents=True, exist_ok=True)
+    receipt_path.write_text(
+        json.dumps({"status": "pass", "validated_at": "stale"}), encoding="utf-8"
+    )
+    raw_output.write_text("changed after stale receipt\n", encoding="utf-8")
+
+    launched = False
+
+    def refuse_launch(*args: object, **kwargs: object) -> object:
+        nonlocal launched
+        launched = True
+        raise AssertionError("extractor must not launch after failed receipt validation")
+
+    monkeypatch.setattr("provenance.stages.subprocess.run", refuse_launch)
+
+    with pytest.raises(ValueError, match="raw output hash does not match payload evidence"):
+        runner(
+            config_path=config_path,
+            run_id=run_id,
+            workspace_root=tmp_path,
+            controlled_source_repo=controlled_repo,
+        )
+
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    assert receipt["status"] == "fail"
+    assert receipt["validated_at"] != "stale"
+    assert receipt["run_id"] == run_id
+    assert any(
+        "raw output hash does not match payload evidence" in error for error in receipt["errors"]
+    )
+    assert not launched
+    assert not (
+        tmp_path / "runs" / run_id / "provenance/products/extracted" / product_name
+    ).exists()
+    assert not (
+        tmp_path / "runs" / run_id / "provenance/logs" / f"{stage_name}.stdout.log"
+    ).exists()
+    assert not (
+        tmp_path / "runs" / run_id / "provenance/logs" / f"{stage_name}.stderr.log"
+    ).exists()
+
+
+def test_extraction_persists_validator_exception_without_changing_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "run.synthetic.yaml"
+    controlled_repo = _create_controlled_source_repo(tmp_path / "controlled-source-demo")
+    _write_config(config_path)
+    run_id = "receipt_validator_error"
+    prepare_workspace(config_path=config_path, run_id=run_id, workspace_root=tmp_path)
+
+    def fail_validation(**kwargs: object) -> dict[str, object]:
+        raise RuntimeError("component could not be decoded")
+
+    monkeypatch.setattr("provenance.scheduler.validate_scheduler_receipt", fail_validation)
+
+    with pytest.raises(RuntimeError, match="component could not be decoded"):
+        run_required_extraction(
+            config_path=config_path,
+            run_id=run_id,
+            workspace_root=tmp_path,
+            controlled_source_repo=controlled_repo,
+        )
+
+    receipt_path = tmp_path / "runs" / run_id / "provenance/validations/scheduler_receipt.json"
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    assert receipt["errors"] == [
+        "scheduler receipt validation raised RuntimeError: component could not be decoded"
+    ]
+    assert receipt["run_id"] == run_id
+    assert receipt["stage"] == "extract_required"
+    assert receipt["status"] == "fail"
+    assert receipt["validated_at"].endswith("Z")
+    assert not (tmp_path / "runs" / run_id / "provenance/products/extracted/required.csv").exists()
+
+
+@pytest.mark.parametrize(
+    ("relative_path", "runner"),
+    [
+        ("scripts/extract_required.pl", run_required_extraction),
+        ("scripts/ad_hoc_extract.py", run_ad_hoc_extraction),
+    ],
+)
+def test_extraction_rejects_tampered_extractor_and_forged_inventory(
+    tmp_path: Path,
+    relative_path: str,
+    runner: Callable[..., object],
+) -> None:
     config_path = tmp_path / "run.synthetic.yaml"
     controlled_repo = _create_controlled_source_repo(tmp_path / "controlled-source-demo")
     _write_config(config_path)
@@ -1280,14 +2376,27 @@ def test_extraction_rejects_tampered_run_local_extractor(tmp_path: Path) -> None
         encoding="utf-8",
     )
     _write_successful_scheduler_receipt(tmp_path, "tampered_extract")
-    extractor = (
-        tmp_path / "runs/tampered_extract/provenance/controlled-source/scripts/extract_required.pl"
-    )
+    extractor = tmp_path / "runs/tampered_extract/provenance/controlled-source" / relative_path
     extractor.chmod(0o755)
-    extractor.write_text("#!/usr/bin/env perl\nexit 0;\n", encoding="utf-8")
+    extractor.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    inventory_path = (
+        tmp_path / "runs/tampered_extract/provenance/inventories/materialized_runtime_scripts.json"
+    )
+    inventory = json.loads(inventory_path.read_text(encoding="utf-8"))
+    artifact = next(item for item in inventory["artifacts"] if item["source_path"] == relative_path)
+    forged_hash = hashlib.sha256(extractor.read_bytes()).hexdigest()
+    artifact["source_sha256"] = forged_hash
+    artifact["sha256"] = forged_hash
+    artifact["destination_file_mode"] = "0755"
+    inventory_path.write_text(json.dumps(inventory), encoding="utf-8")
 
-    with pytest.raises(ValueError, match="materialized artifact integrity mismatch"):
-        run_required_extraction(
+    with pytest.raises(
+        ValueError,
+        match=(
+            f"inventory disagrees with preflight admission.*{relative_path}|destination_file_mode"
+        ),
+    ):
+        runner(
             config_path=config_path,
             run_id="tampered_extract",
             workspace_root=tmp_path,

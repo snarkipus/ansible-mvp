@@ -138,8 +138,8 @@ make wait-mock-lsf
 make collect-mock-lsf
 make extract-required
 make extract-ad-hoc
-make build-reports
 make validate
+make build-reports
 make inventory-post
 make manifest
 make manifest-smoke
@@ -235,6 +235,11 @@ uniqueness/order/success, on-disk artifact hashes, selected-source and producer
 links, scheduler coherence, and successful configured product validations. It
 does not rewrite `manifest.yaml`.
 
+Treat this as a finalized/unchanged-byte check, not immutability. Admitted
+selected-commit identities still govern after ref, worktree, or inventory
+changes. A CSV receipt binds exact size and SHA-256; reports recheck and consume
+those validated bytes, so stale receipts cannot authorize changed CSVs.
+
 Remember that `dirA`, `dirB`, and `dirC` repeat in multiple areas. Identify files
 by full relative path plus `sim_area` and `logical_group`, never by the leaf folder
 name alone.
@@ -254,6 +259,9 @@ Safe rules:
    script paths.
 5. Let preflight validate tracked state, worktree cleanliness, script existence,
    and stage command paths before execution.
+
+Materialization rejects absolute, traversing, and symlink-escaped source or
+destination paths before any read or write.
 
 Unsafe patterns:
 
@@ -319,7 +327,8 @@ When adding a new stage or artifact:
   Extraction intentionally refuses `EXIT`, `TIMEOUT`, missing state, or stale
   non-terminal state; only terminal `DONE` allows extraction.
 - **CSV validation failure:** compare the generated CSV with
-  `configs/expected_shape.required_extract.yaml`.
+  `configs/expected_shape.required_extract.yaml`. Changed CSV bytes require a
+  fresh validation receipt before reports can be built.
 - **Real LSF tools are absent:** this is expected for the MVP; mock scheduler mode
   is used instead of `bsub`, `bjobs`, `bhist`, or `bacct`.
 
@@ -394,6 +403,10 @@ Read these before treating run evidence as more than it claims to be:
   before execution, so stages do not execute scripts from the live source
   worktree. Those run-local files and receipts remain mutable to a sufficiently
   privileged local user because no signing or immutable archive is implemented.
+- **Scheduler and manifest receipts are coherence checks, not external trust.**
+  Extraction requires fresh coherent scheduler components and raw-output
+  identity. Manifest finalization is tied to admitted identities and unchanged
+  bytes, without signing, trusted timestamps, or tamper-evident storage.
 - **Evidence is host-bound.** Manifest evidence may include absolute local
   host paths. This MVP produces local evidence, not a portable archive
   format, so those paths are accepted context rather than normalized or

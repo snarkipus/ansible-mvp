@@ -1,3 +1,4 @@
+import hashlib
 import json
 from pathlib import Path
 from typing import Any, cast
@@ -24,8 +25,22 @@ def _write_extracted_products(root: Path, run_id: str) -> Path:
     provenance = root / "runs" / run_id / "provenance"
     validations = provenance / "validations"
     validations.mkdir()
-    for name in ("required_extract", "ad_hoc_extract"):
-        (validations / f"{name}.json").write_text(json.dumps({"status": "pass"}), encoding="utf-8")
+    for name, product_name in (
+        ("required_extract", "required.csv"),
+        ("ad_hoc_extract", "ad_hoc.csv"),
+    ):
+        product = extracted / product_name
+        (validations / f"{name}.json").write_text(
+            json.dumps(
+                {
+                    "status": "pass",
+                    "path": f"products/extracted/{product_name}",
+                    "size_bytes": product.stat().st_size,
+                    "sha256": hashlib.sha256(product.read_bytes()).hexdigest(),
+                }
+            ),
+            encoding="utf-8",
+        )
     return provenance
 
 
@@ -125,6 +140,67 @@ def test_report_generation_requires_both_passed_input_validations(tmp_path: Path
 
     reports_root = provenance_root / "products" / "reports"
     assert not any(reports_root.iterdir())
+
+
+@pytest.mark.parametrize("product_name", ["required", "ad_hoc"])
+@pytest.mark.parametrize("stale_field", ["path", "size_bytes", "sha256", "current_bytes"])
+def test_report_generation_rejects_stale_validation_receipt(
+    tmp_path: Path, product_name: str, stale_field: str
+) -> None:
+    run_id = f"stale_{product_name}_{stale_field}"
+    provenance_root = _write_extracted_products(tmp_path, run_id)
+    product = provenance_root / "products" / "extracted" / f"{product_name}.csv"
+    receipt_name = "required_extract" if product_name == "required" else "ad_hoc_extract"
+    receipt_path = provenance_root / "validations" / f"{receipt_name}.json"
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    if stale_field == "path":
+        receipt["path"] = f"products/extracted/not-{product_name}.csv"
+    elif stale_field == "size_bytes":
+        receipt["size_bytes"] += 1
+    elif stale_field == "sha256":
+        receipt["sha256"] = "0" * 64
+    else:
+        original = product.read_bytes()
+        product.write_bytes(original.replace(b"dirC", b"dirB", 1))
+        assert product.stat().st_size == len(original)
+    receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+
+    reports_root = provenance_root / "products" / "reports"
+    reports_root.mkdir()
+    existing = {name: f"existing {name}\n" for name in reports.REPORT_FILENAMES}
+    for name, content in existing.items():
+        (reports_root / name).write_text(content, encoding="utf-8")
+
+    with pytest.raises(ValueError, match=f"rejected (stale )?{receipt_name} validation"):
+        build_report_product_evidence(run_id=run_id, workspace_root=tmp_path)
+
+    for name, content in existing.items():
+        assert (reports_root / name).read_text(encoding="utf-8") == content
+    assert not list(reports_root.glob(".report.*"))
+
+
+def test_report_generation_consumes_only_bytes_bound_to_validation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_id = "validated_bytes_only"
+    provenance_root = _write_extracted_products(tmp_path, run_id)
+    original_gate = reports._require_bound_report_input_validation
+
+    def mutate_after_gate(root: Path, name: str, product: Path) -> bytes:
+        validated_bytes = original_gate(root, name, product)
+        if name == "required_extract":
+            product.write_text(
+                "logical_group,example,bytes,sha256_prefix\ndirC,replaced.dat,1,xxxx\n"
+            )
+        return validated_bytes
+
+    monkeypatch.setattr(reports, "_require_bound_report_input_validation", mutate_after_gate)
+
+    build_report_product_evidence(run_id=run_id, workspace_root=tmp_path)
+
+    workbook = load_workbook(provenance_root / "products" / "reports" / "summary.xlsx")
+    assert workbook["summary"]["B2"].value == 2
+    assert workbook["required_extract"]["B2"].value == "ex1.dat"
 
 
 def test_report_validation_failure_preserves_existing_products(

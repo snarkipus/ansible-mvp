@@ -14,7 +14,7 @@ from typing import Any
 from provenance.config import read_config_mapping
 from provenance.hashing import hash_artifact
 from provenance.inventory import infer_metadata
-from provenance.paths import resolve_layout_path
+from provenance.paths import resolve_layout_path, resolve_root_relative_path
 from provenance.workspace import verify_materialization_evidence
 
 
@@ -402,6 +402,7 @@ def _run_configured_stage(
     verify_materialization_evidence(
         provenance_root / "inventories" / "materialized_runtime_scripts.json",
         workspace_root=root,
+        controlled_source_repo=controlled_source_repo,
     )
 
     stdout_log = log_root / f"{stage_name}.stdout.log"
@@ -490,23 +491,60 @@ def _require_scheduler_receipt_for_extraction(
     # Local import avoids a module cycle: scheduler execution calls stage helpers.
     from provenance.scheduler import validate_scheduler_receipt
 
-    receipt = validate_scheduler_receipt(
-        config_path=config_path,
-        run_id=run_id,
-        workspace_root=root,
+    receipt_path = resolve_root_relative_path(
+        provenance_root,
+        "validations/scheduler_receipt.json",
+        field_name="scheduler receipt validation evidence path",
     )
-    receipt_path = provenance_root / "validations" / "scheduler_receipt.json"
-    receipt_path.parent.mkdir(parents=True, exist_ok=True)
-    receipt_path.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    try:
+        receipt = validate_scheduler_receipt(
+            config_path=config_path,
+            run_id=run_id,
+            workspace_root=root,
+        )
+    except Exception as error:
+        failure_receipt = {
+            "status": "fail",
+            "validated_at": _format_timestamp(_utc_now()),
+            "run_id": run_id,
+            "stage": stage_name,
+            "errors": [f"scheduler receipt validation raised {type(error).__name__}: {error}"],
+        }
+        try:
+            _write_scheduler_receipt_evidence(receipt_path, failure_receipt)
+        except OSError as evidence_error:
+            error.add_note(
+                "failed to persist scheduler receipt validation evidence at "
+                f"{_display_path(root, receipt_path)}: {evidence_error}"
+            )
+        raise
+
+    gate_error: ValueError | None = None
     if receipt.get("status") != "pass":
         errors = receipt.get("errors")
         details = (
             "; ".join(str(error) for error in errors) if isinstance(errors, list) else "unknown"
         )
-        raise ValueError(
+        gate_error = ValueError(
             f"{stage_name} requires a passed scheduler receipt before extraction: {details}; "
             f"evidence: {_display_path(root, receipt_path)}"
         )
+    try:
+        _write_scheduler_receipt_evidence(receipt_path, receipt)
+    except OSError as evidence_error:
+        if gate_error is None:
+            raise
+        gate_error.add_note(
+            "failed to persist scheduler receipt validation evidence at "
+            f"{_display_path(root, receipt_path)}: {evidence_error}"
+        )
+    if gate_error is not None:
+        raise gate_error
+
+
+def _write_scheduler_receipt_evidence(path: Path, receipt: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def _display_path(root: Path, path: Path) -> str:

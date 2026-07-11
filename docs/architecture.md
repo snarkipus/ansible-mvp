@@ -155,7 +155,10 @@ Admission resolves each configured artifact from the selected commit and
 records its commit, Git blob ID, tracked mode, and SHA-256. Materialization
 writes read-only run-local copies, and pre-execution verification checks their
 mode and hash before consumption. Execution therefore does not depend on a
-later read from the mutable source worktree.
+later read from the mutable source worktree. Both source and destination are
+proven contained before direct materialization access. The admitted
+selected-commit identity—not a later mutable tag, worktree, or inventory—remains
+the integrity authority.
 
 ### Why mock LSF
 
@@ -263,7 +266,8 @@ direct simulation execution.
 
 `inventory-pre` records pre-run input/script evidence before mock LSF
 submission. Both extracts are semantically validated before report generation;
-reports are atomically published only from passed inputs. `inventory-post`
+each receipt binds the exact CSV size and SHA-256, and reports consume those
+rechecked bytes. Reports are atomically published only from passed inputs. `inventory-post`
 records output evidence after validation and report generation.
 
 ## Controlled source gate
@@ -351,6 +355,11 @@ includes:
 - hash status for tracked artifacts,
 - notes and open warnings.
 
+Assembly rejects disagreement with admitted commit/materialization identities.
+Scheduler evidence must be mutually coherent across submission, state,
+terminal verdict, accounting, payload, timestamps, and raw-output hash; smoke
+validation repeats these links against the finalized manifest.
+
 The manifest is finalized once. `logs/manifest.stage.json` is then written as a
 sibling assembly receipt containing the final manifest SHA-256. Post-manifest
 smoke verifies those exact bytes and cross-record semantics, then writes
@@ -358,7 +367,9 @@ smoke verifies those exact bytes and cross-record semantics, then writes
 same hash. These finalization receipts are intentionally absent from the
 manifest they finalize and verify.
 
-This is local capture and selected-commit binding, not preservation. The MVP
+“Finalized” means sibling receipts identify unchanged manifest bytes; it does
+not make the file immutable. This is local capture and selected-commit binding,
+not preservation. The MVP
 does not sign evidence, provide trusted timestamps, make evidence tamper-evident,
 or place it in an immutable archive.
 

@@ -35,7 +35,7 @@ from provenance.manifest import (
     semantic_consistency_errors,
     write_manifest,
 )
-from provenance.paths import validate_run_id
+from provenance.paths import resolve_layout_path, validate_run_id
 from provenance.preflight import PreflightError, run_preflight
 from provenance.reports import build_report_product_evidence
 from provenance.scheduler import (
@@ -287,12 +287,12 @@ def _build_parser() -> argparse.ArgumentParser:
     smoke = subparsers.add_parser("smoke-manifest", help="smoke-validate manifest sections")
     smoke.add_argument("manifest", type=Path)
     smoke.add_argument("--output", type=Path, help="optional JSON output path")
-    smoke.add_argument("--config", type=Path, default=Path("configs/run.synthetic.yaml"))
-    smoke.add_argument("--run-id", type=validate_run_id)
-    smoke.add_argument("--workspace-root", type=Path, default=Path("."))
+    smoke.add_argument("--config", type=Path, required=True)
+    smoke.add_argument("--run-id", required=True, type=validate_run_id)
+    smoke.add_argument("--workspace-root", required=True, type=Path)
     smoke.add_argument("--controlled-source-repo", type=Path)
     smoke.add_argument("--controlled-source-ref")
-    smoke.add_argument("--stage-output", type=Path, help="optional stage JSON output path")
+    smoke.add_argument("--stage-output", required=True, type=Path)
     smoke.set_defaults(func=_cmd_smoke_manifest)
 
     return parser
@@ -698,7 +698,9 @@ def _run_inventory_pre(args: argparse.Namespace) -> int:
         materialization_evidence=inventory_root / "materialized_runtime_scripts.json",
     )
     scripts.extend(
-        _run_local_controlled_code_records(inventory_root / "materialized_runtime_scripts.json")
+        _run_local_controlled_code_records(
+            inventory_root / "materialized_runtime_scripts.json", workspace_root=root
+        )
     )
     _write_json(inputs, inputs_output)
     _write_json(scripts, scripts_output)
@@ -773,7 +775,9 @@ def _pre_run_inventory_records(
     return payload
 
 
-def _run_local_controlled_code_records(materialization_evidence: Path) -> list[dict[str, Any]]:
+def _run_local_controlled_code_records(
+    materialization_evidence: Path, *, workspace_root: Path
+) -> list[dict[str, Any]]:
     loaded = json.loads(materialization_evidence.read_text(encoding="utf-8"))
     artifacts = loaded.get("artifacts") if isinstance(loaded, dict) else None
     if not isinstance(artifacts, list):
@@ -782,15 +786,22 @@ def _run_local_controlled_code_records(materialization_evidence: Path) -> list[d
         )
     records: list[dict[str, Any]] = []
     for artifact in artifacts:
-        if not isinstance(artifact, dict) or artifact.get("role") != "controlled_code":
+        if not isinstance(artifact, dict):
             continue
         destination = artifact.get("destination_path")
         if not isinstance(destination, str) or not destination:
             raise ValueError(
                 f"controlled-code destination path is missing: {materialization_evidence}"
             )
+        # Select by the admitted destination area, never by the mutable role
+        # copied into this inventory. Runtime code under sim-run-root/procs is
+        # already inventoried above; every selected engine/extractor lives in
+        # this run-local controlled-source area.
+        if "/provenance/controlled-source/" not in destination:
+            continue
         record = dict(artifact)
         record["run_relative_path"] = destination
+        record["size_bytes"] = (workspace_root / destination).stat().st_size
         marker = "/provenance/"
         record["relative_path"] = (
             f"provenance/{destination.split(marker, maxsplit=1)[1]}"
@@ -1004,12 +1015,71 @@ def _run_assemble_run_manifest(args: argparse.Namespace) -> int:
 
 
 def _cmd_smoke_manifest(args: argparse.Namespace) -> int:
-    if args.run_id is None or args.stage_output is None:
-        return _run_smoke_manifest(args, None)
+    _validate_smoke_manifest_context(args)
     with _support_stage_attempt(
         args, "manifest_smoke", controlled_source_repo=args.controlled_source_repo
     ) as attempt:
         return _run_smoke_manifest(args, attempt)
+
+
+def _validate_smoke_manifest_context(args: argparse.Namespace) -> None:
+    """Bind smoke validation and its receipts to one configured run."""
+
+    root = args.workspace_root.expanduser().resolve()
+    config = read_config_mapping(args.config)
+    layout = config.get("layout")
+    if not isinstance(layout, dict):
+        raise ValueError("layout must be a mapping")
+    run_root = resolve_layout_path(root, layout, "run_root", args.run_id)
+    provenance_root = resolve_layout_path(root, layout, "provenance_root", args.run_id)
+    expected_manifest = (run_root / "provenance/manifest.yaml").resolve()
+    expected_stage_output = (provenance_root / "logs/manifest_smoke.stage.json").resolve()
+    expected_receipt = (provenance_root / "logs/manifest.stage.json").resolve()
+
+    configured_paths = {
+        "run root": run_root,
+        "provenance root": provenance_root,
+        "manifest": expected_manifest,
+        "manifest smoke stage evidence": expected_stage_output,
+        "manifest stage evidence": expected_receipt,
+    }
+    for name, path in configured_paths.items():
+        if not path.resolve().is_relative_to(root):
+            raise ValueError(f"configured {name} path escapes workspace root")
+    supplied = {
+        "manifest": (args.manifest, expected_manifest),
+        "manifest smoke stage evidence": (args.stage_output, expected_stage_output),
+    }
+    for name, (value, expected) in supplied.items():
+        if not isinstance(value, Path) or value.expanduser().resolve() != expected:
+            raise ValueError(f"{name} path does not match configured path for run {args.run_id}")
+
+    manifest = _read_yaml_mapping(args.manifest)
+    run = manifest.get("run")
+    simulation_layout = manifest.get("simulation_layout")
+    if not isinstance(run, dict) or run.get("run_id") != args.run_id:
+        raise ValueError("manifest run.run_id does not match --run-id")
+
+    def matches_configured(value: object, expected: Path, field: str) -> None:
+        if not isinstance(value, str) or not value:
+            raise ValueError(f"manifest {field} is missing")
+        candidate = Path(value)
+        if not candidate.is_absolute():
+            candidate = root / candidate
+        if candidate.expanduser().resolve() != expected:
+            raise ValueError(
+                f"manifest {field} does not match configured path for run {args.run_id}"
+            )
+
+    matches_configured(run.get("run_root"), run_root, "run.run_root")
+    if not isinstance(simulation_layout, dict):
+        raise ValueError("manifest simulation_layout must be a mapping")
+    matches_configured(simulation_layout.get("run_root"), run_root, "simulation_layout.run_root")
+    matches_configured(
+        simulation_layout.get("provenance_root"),
+        provenance_root,
+        "simulation_layout.provenance_root",
+    )
 
 
 def _run_smoke_manifest(args: argparse.Namespace, attempt: _SupportAttemptOutcome | None) -> int:
@@ -1020,32 +1090,55 @@ def _run_smoke_manifest(args: argparse.Namespace, attempt: _SupportAttemptOutcom
     assembly_receipt_path: Path | None = None
     assembly_manifest_sha256: str | None = None
     semantic_errors: list[str] = []
-    if args.run_id is not None and args.stage_output is not None:
-        semantic_errors.extend(
-            semantic_consistency_errors(
-                manifest,
-                config_path=args.config,
-                workspace_root=args.workspace_root,
-            )
+    semantic_errors.extend(
+        semantic_consistency_errors(
+            manifest,
+            config_path=args.config,
+            workspace_root=args.workspace_root,
         )
-        stage_output = args.stage_output
-        if not isinstance(stage_output, Path):
-            raise ValueError("manifest smoke stage output must be a path")
-        assembly_receipt_path = stage_output.with_name("manifest.stage.json")
-        try:
-            assembly_receipt = json.loads(assembly_receipt_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as error:
-            semantic_errors.append(f"manifest assembly receipt cannot be read: {error}")
+    )
+    stage_output = args.stage_output
+    if not isinstance(stage_output, Path):
+        raise ValueError("manifest smoke stage output must be a path")
+    assembly_receipt_path = stage_output.with_name("manifest.stage.json")
+    try:
+        assembly_receipt = json.loads(assembly_receipt_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        semantic_errors.append(f"manifest assembly receipt cannot be read: {error}")
+    else:
+        if not isinstance(assembly_receipt, dict):
+            semantic_errors.append("manifest assembly receipt must be a mapping")
         else:
-            if not isinstance(assembly_receipt, dict):
-                semantic_errors.append("manifest assembly receipt must be a mapping")
-            else:
-                recorded_hash = assembly_receipt.get("manifest_sha256")
-                assembly_manifest_sha256 = recorded_hash if isinstance(recorded_hash, str) else None
-                if assembly_manifest_sha256 != manifest_sha256:
-                    semantic_errors.append(
-                        "manifest SHA-256 does not match external assembly receipt"
-                    )
+            root = args.workspace_root.expanduser().resolve()
+
+            def receipt_path_matches(value: object, expected: Path) -> bool:
+                if not isinstance(value, str) or not value:
+                    return False
+                candidate = Path(value)
+                if not candidate.is_absolute():
+                    candidate = root / candidate
+                return candidate.resolve() == expected.resolve()
+
+            if assembly_receipt.get("name") != "manifest":
+                semantic_errors.append("manifest assembly receipt name must be 'manifest'")
+            if assembly_receipt.get("status") != "pass":
+                semantic_errors.append("manifest assembly receipt status must be 'pass'")
+            if assembly_receipt.get("return_code") != 0:
+                semantic_errors.append("manifest assembly receipt return_code must be 0")
+            if not receipt_path_matches(
+                assembly_receipt.get("evidence_path"), assembly_receipt_path
+            ):
+                semantic_errors.append(
+                    "manifest assembly receipt evidence_path does not identify the receipt"
+                )
+            if not receipt_path_matches(assembly_receipt.get("manifest"), args.manifest):
+                semantic_errors.append(
+                    "manifest assembly receipt manifest path does not identify the checked manifest"
+                )
+            recorded_hash = assembly_receipt.get("manifest_sha256")
+            assembly_manifest_sha256 = recorded_hash if isinstance(recorded_hash, str) else None
+            if assembly_manifest_sha256 != manifest_sha256:
+                semantic_errors.append("manifest SHA-256 does not match external assembly receipt")
     passed = not missing and not missing_key_values and not semantic_errors
     payload = {
         "status": "pass" if passed else "fail",

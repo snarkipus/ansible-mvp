@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
 from provenance.validation import CSVShapeExpectation, ValidationStatus, validate_csv_product
@@ -25,6 +26,7 @@ def test_validate_csv_product_records_passing_shape_evidence(tmp_path: Path) -> 
     assert evidence.passed is True
     assert evidence.total_rows == 3
     assert evidence.data_rows == 2
+    assert evidence.sha256 == hashlib.sha256(product.read_bytes()).hexdigest()
     assert evidence.header == ("case", "value")
     assert evidence.column_counts == (2, 2, 2)
     assert [check.name for check in evidence.checks] == [
@@ -40,6 +42,7 @@ def test_validate_csv_product_records_passing_shape_evidence(tmp_path: Path) -> 
         "path": "products/extracted/required.csv",
         "status": "pass",
         "size_bytes": product.stat().st_size,
+        "sha256": hashlib.sha256(product.read_bytes()).hexdigest(),
         "total_rows": 3,
         "data_rows": 2,
         "header": ["case", "value"],
