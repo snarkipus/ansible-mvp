@@ -11,6 +11,7 @@ from provenance.git_state import (
     capture_repository_state,
     resolve_ref,
     script_identity,
+    selected_tree_artifact_identity,
     tracked_file_state,
 )
 
@@ -113,6 +114,42 @@ def test_repository_relative_paths_must_stay_inside_repo(tmp_path: Path) -> None
 
     with pytest.raises(GitStateError):
         tracked_file_state(repo, "../escape.sh")
+
+
+def test_selected_tree_artifact_identity_reads_commit_not_worktree(tmp_path: Path) -> None:
+    repo = _init_repo(tmp_path)
+    script = repo / "scripts" / "run.sh"
+    script.parent.mkdir()
+    script.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    script.chmod(0o755)
+    _git(repo, "add", "scripts/run.sh")
+    _git(repo, "commit", "-m", "add script")
+    commit = resolve_ref(repo, "HEAD").resolved_commit
+    script.write_text("changed worktree\n", encoding="utf-8")
+
+    identity = selected_tree_artifact_identity(repo, commit, "scripts/run.sh")
+
+    assert identity.selected_commit == commit
+    assert identity.relative_path == "scripts/run.sh"
+    assert identity.file_mode == "100755"
+    assert identity.executable is True
+    assert identity.size_bytes == len(b"#!/bin/sh\nexit 0\n")
+    assert identity.content == b"#!/bin/sh\nexit 0\n"
+    assert len(identity.sha256) == 64
+    assert identity.to_dict()["blob_oid"] == identity.blob_oid
+
+
+def test_selected_tree_artifact_identity_rejects_missing_and_symlink(tmp_path: Path) -> None:
+    repo = _init_repo(tmp_path)
+    (repo / "target.txt").write_text("target\n", encoding="utf-8")
+    (repo / "link.txt").symlink_to("target.txt")
+    _git(repo, "add", "target.txt", "link.txt")
+    _git(repo, "commit", "-m", "add files")
+
+    with pytest.raises(GitStateError, match="absent from selected commit"):
+        selected_tree_artifact_identity(repo, "HEAD", "missing.txt")
+    with pytest.raises(GitStateError, match="must be a regular file"):
+        selected_tree_artifact_identity(repo, "HEAD", "link.txt")
 
 
 def _init_repo(tmp_path: Path) -> Path:

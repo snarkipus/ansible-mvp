@@ -3,9 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import pytest
 import yaml
 
-from provenance.config import read_config_mapping
+from provenance.config import read_config_mapping, validate_run_configuration
 from provenance.stages import configured_harness_make_targets
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -48,8 +49,8 @@ def test_run_config_declares_controlled_scripts_and_stage_commands() -> None:
         "collect_mock_lsf",
         "extract_required",
         "extract_ad_hoc",
-        "build_reports",
         "validate",
+        "build_reports",
         "inventory_post",
         "manifest",
         "manifest_smoke",
@@ -111,8 +112,10 @@ def test_run_config_links_layout_hash_policy_and_validation_expectations() -> No
     assert shape["expectations"] == {
         "expected_header": ["logical_group", "example", "bytes", "sha256_prefix"],
         "expected_column_count": 4,
-        "minimum_data_rows": 1,
+        "expected_data_rows": 3,
         "non_empty": True,
+        "expected_column_values": {"logical_group": ["dirC"]},
+        "integer_columns": ["bytes"],
     }
 
 
@@ -200,10 +203,71 @@ def test_config_derived_harness_targets_follow_stage_order_without_payload_direc
         "collect-mock-lsf",
         "extract-required",
         "extract-ad-hoc",
-        "build-reports",
         "validate",
+        "build-reports",
         "inventory-post",
         "manifest",
         "manifest-smoke",
     ]
     assert "run-simulation" not in targets
+
+
+@pytest.mark.parametrize(
+    ("mutation", "expected_message"),
+    [
+        (lambda config: config["stages"][1].update(name="preflight"), "duplicate name"),
+        (lambda config: config["stages"][1].update(display_order=10), "duplicate display_order"),
+        (
+            lambda config: config["stages"][1].update(lifecycle_class="unknown"),
+            "lifecycle_class is unknown",
+        ),
+        (
+            lambda config: config["stages"][1].update(working_directory="controlled_source_repo"),
+            "working_directory must be 'wrapper_repo'",
+        ),
+        (lambda config: config["stages"][1].update(command="make clean"), "approved target"),
+        (
+            lambda config: config["stages"][1].update(outputs=["../../outside"]),
+            "without '..'",
+        ),
+        (
+            lambda config: config["materialization"]["inputs"].update(
+                destination_root="../outside"
+            ),
+            "without '..'",
+        ),
+        (
+            lambda config: config["scheduler"].update(metadata_path="provenance/../outside.yaml"),
+            "without '..'",
+        ),
+    ],
+)
+def test_run_configuration_rejects_unsafe_or_ambiguous_declarations(
+    tmp_path: Path,
+    mutation: Any,
+    expected_message: str,
+) -> None:
+    config = _load_yaml("configs/run.synthetic.yaml")
+    mutation(config)
+    controlled_root = tmp_path / "controlled"
+    controlled_root.mkdir()
+
+    with pytest.raises(ValueError, match=expected_message):
+        validate_run_configuration(
+            config,
+            workspace_root=tmp_path,
+            controlled_source_root=controlled_root,
+            run_id="safe_run",
+        )
+
+
+def test_run_configuration_accepts_checked_in_config(tmp_path: Path) -> None:
+    controlled_root = tmp_path / "controlled"
+    controlled_root.mkdir()
+
+    validate_run_configuration(
+        _load_yaml("configs/run.synthetic.yaml"),
+        workspace_root=tmp_path,
+        controlled_source_root=controlled_root,
+        run_id="safe_run",
+    )

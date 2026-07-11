@@ -1,8 +1,10 @@
 import hashlib
 import json
 import subprocess
+from argparse import Namespace
 from pathlib import Path
 
+import pytest
 import yaml
 from pytest import MonkeyPatch
 
@@ -10,6 +12,129 @@ import provenance.cli as cli
 from provenance.cli import main
 from provenance.config import read_config_mapping
 from provenance.manifest import REQUIRED_TOP_LEVEL_SECTIONS
+
+
+@pytest.mark.parametrize("run_id", ["../escape", "/absolute", "two words"])
+def test_cli_rejects_unsafe_run_id_before_writing(tmp_path: Path, run_id: str) -> None:
+    with pytest.raises(SystemExit) as error:
+        main(
+            [
+                "prepare-workspace",
+                "--config",
+                str(tmp_path / "missing.yaml"),
+                "--run-id",
+                run_id,
+                "--workspace-root",
+                str(tmp_path),
+            ]
+        )
+
+    assert error.value.code == 2
+    assert not (tmp_path / "runs").exists()
+
+
+def test_support_stage_attempt_recorder_preserves_success_and_failure(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    attempts: list[dict[str, object]] = []
+
+    def record(_args: Namespace, stage_name: str, **values: object) -> None:
+        attempts.append({"stage_name": stage_name, **values})
+
+    monkeypatch.setattr(cli, "_write_support_stage_attempt", record)
+    args = Namespace()
+
+    with cli._support_stage_attempt(args, "prepare_workspace"):
+        pass
+    original = ValueError("operation failed")
+    with pytest.raises(ValueError) as raised:
+        with cli._support_stage_attempt(args, "prepare_workspace"):
+            raise original
+
+    assert raised.value is original
+    assert attempts[0]["stage_name"] == "prepare_workspace"
+    assert attempts[0].get("status", "pass") == "pass"
+    assert attempts[1]["status"] == "fail"
+    assert attempts[1]["return_code"] == 1
+    assert attempts[1]["error"] is original
+
+
+def test_support_stage_attempt_recorder_does_not_mask_evidence_failure(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    def fail_to_record(*_args: object, **_kwargs: object) -> None:
+        raise OSError("evidence unavailable")
+
+    monkeypatch.setattr(cli, "_write_support_stage_attempt", fail_to_record)
+    original = ValueError("operation failed")
+
+    with pytest.raises(ValueError) as raised:
+        with cli._support_stage_attempt(Namespace(), "prepare_workspace"):
+            raise original
+
+    assert raised.value is original
+    assert "failed to record prepare_workspace" in raised.value.__notes__[0]
+
+
+@pytest.mark.parametrize(
+    ("case", "stage_name"),
+    [
+        ("validation", "validate"),
+        ("extraction", "extract_required"),
+        ("scheduler_collection", "collect_mock_lsf"),
+        ("reports", "build_reports"),
+        ("manifest", "manifest"),
+    ],
+)
+def test_command_failure_paths_record_failed_attempts(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+    case: str,
+    stage_name: str,
+) -> None:
+    attempts: list[dict[str, object]] = []
+
+    def record(_args: Namespace, recorded_stage: str, **values: object) -> None:
+        attempts.append({"stage_name": recorded_stage, **values})
+
+    def fail(*_args: object, **_kwargs: object) -> None:
+        raise ValueError(f"{case} failed")
+
+    monkeypatch.setattr(cli, "_write_support_stage_attempt", record)
+    args = Namespace(
+        config=tmp_path / "config.yaml",
+        run_id="failure_case",
+        workspace_root=tmp_path,
+        controlled_source_repo=tmp_path / "controlled",
+        controlled_source_ref="controlled-source-demo-v0.1.2",
+        output=None,
+        stage_output=tmp_path / "attempt.json",
+    )
+    if case == "validation":
+        monkeypatch.setattr(cli, "_run_validate_required", fail)
+        command = cli._cmd_validate_required
+    elif case == "extraction":
+        monkeypatch.setattr(cli, "run_required_extraction", fail)
+        command = cli._cmd_extract_required
+    elif case == "scheduler_collection":
+        monkeypatch.setattr(cli, "collect_mock_lsf_accounting", fail)
+        command = cli._cmd_collect_mock_lsf
+    elif case == "reports":
+        monkeypatch.setattr(cli, "build_report_product_evidence", fail)
+        command = cli._cmd_build_reports
+    else:
+        monkeypatch.setattr(cli, "_run_assemble_run_manifest", fail)
+        command = cli._cmd_assemble_run_manifest
+
+    with pytest.raises(ValueError, match=f"{case} failed"):
+        command(args)
+
+    assert attempts[-1]["stage_name"] == stage_name
+    assert attempts[-1]["status"] == "fail"
+    assert attempts[-1]["return_code"] == 1
+    error = attempts[-1]["error"]
+    assert isinstance(error, ValueError)
+    assert str(error) == f"{case} failed"
 
 
 def test_cli_inventory_outputs_records_with_hashes(tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
@@ -41,7 +166,7 @@ def test_cli_inventory_pre_writes_input_and_script_inventories(tmp_path: Path, c
                 "artifacts": [
                     {
                         "source_repository": "/controlled-source-demo",
-                        "source_ref": "controlled-source-demo-v0.1.1",
+                        "source_ref": "controlled-source-demo-v0.1.2",
                         "source_resolved_commit": "abc123",
                         "source_path": "fixtures/controlled_inputs/dirC/ex1.dat",
                         "destination_path": "runs/demo_001/sim-run-root/input/dirC/ex1.dat",
@@ -59,7 +184,7 @@ def test_cli_inventory_pre_writes_input_and_script_inventories(tmp_path: Path, c
                 "artifacts": [
                     {
                         "source_repository": "/controlled-source-demo",
-                        "source_ref": "controlled-source-demo-v0.1.1",
+                        "source_ref": "controlled-source-demo-v0.1.2",
                         "source_resolved_commit": "abc123",
                         "source_path": "procs/run-script.sh",
                         "destination_path": "runs/demo_001/sim-run-root/procs/run-script.sh",
@@ -359,7 +484,7 @@ def test_cli_manifest_smoke_fails_for_missing_key_values(tmp_path: Path, capsys)
     assert "run.run_id" in smoke["missing_required_key_values"]
 
 
-def test_cli_manifest_smoke_hashes_refreshed_final_manifest(
+def test_cli_manifest_smoke_verifies_unchanged_assembled_manifest(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
     manifest_path = tmp_path / "runs" / "demo_001" / "provenance" / "manifest.yaml"
@@ -427,24 +552,16 @@ def test_cli_manifest_smoke_hashes_refreshed_final_manifest(
         "validations": [{"status": "pass"}],
         "logs": [{"path": "logs/run_simulation.stdout.log"}],
         "hash_policy": {"algorithm": "sha256"},
-        "notes": ["before-refresh"],
+        "notes": ["immutable"],
     }
-    refreshed_manifest = dict(base_manifest)
-    refreshed_manifest["notes"] = ["after-refresh"]
-    refreshed_manifest["stages"] = [
-        *base_manifest["stages"],
-        {
-            "name": "manifest_smoke",
-            "display_name": "Verify manifest",
-            "lifecycle_class": "finalization",
-            "display_order": 140,
-            "operator_visible": False,
-            "status": "pass",
-        },
-    ]
     manifest_path.parent.mkdir(parents=True)
     manifest_path.write_text(yaml.safe_dump(base_manifest), encoding="utf-8")
-    monkeypatch.setattr(cli, "assemble_run_manifest", lambda **_: refreshed_manifest)
+    original_manifest_bytes = manifest_path.read_bytes()
+    manifest_sha256 = hashlib.sha256(original_manifest_bytes).hexdigest()
+    assembly_receipt = smoke_stage_output.with_name("manifest.stage.json")
+    assembly_receipt.parent.mkdir(parents=True)
+    assembly_receipt.write_text(json.dumps({"manifest_sha256": manifest_sha256}), encoding="utf-8")
+    monkeypatch.setattr(cli, "semantic_consistency_errors", lambda *_args, **_kwargs: ())
 
     assert (
         main(
@@ -460,7 +577,7 @@ def test_cli_manifest_smoke_hashes_refreshed_final_manifest(
                 "--controlled-source-repo",
                 str(tmp_path / "controlled-source-demo"),
                 "--controlled-source-ref",
-                "controlled-source-demo-v0.1.1",
+                "controlled-source-demo-v0.1.2",
                 "--stage-output",
                 str(smoke_stage_output),
             ]
@@ -469,10 +586,48 @@ def test_cli_manifest_smoke_hashes_refreshed_final_manifest(
     )
 
     smoke = json.loads(smoke_output.read_text(encoding="utf-8"))
-    final_manifest_bytes = manifest_path.read_bytes()
-    final_manifest = yaml.safe_load(final_manifest_bytes)
-    assert final_manifest["notes"] == ["after-refresh"]
-    assert smoke["manifest_sha256"] == hashlib.sha256(final_manifest_bytes).hexdigest()
+    assert manifest_path.read_bytes() == original_manifest_bytes
+    assert smoke["manifest_sha256"] == manifest_sha256
+    assert smoke["assembly_manifest_sha256"] == manifest_sha256
+    assert smoke["manifest_hash_matches_assembly_receipt"] is True
+    stage_receipt = json.loads(smoke_stage_output.read_text(encoding="utf-8"))
+    assert stage_receipt["manifest_sha256"] == manifest_sha256
+    assert stage_receipt["manifest_hash_matches_assembly_receipt"] is True
+
+
+def test_cli_manifest_smoke_rejects_manifest_changed_after_assembly(tmp_path: Path) -> None:
+    manifest_path = tmp_path / "runs" / "demo_001" / "provenance" / "manifest.yaml"
+    smoke_output = manifest_path.parent / "validations" / "manifest_smoke.json"
+    smoke_stage_output = manifest_path.parent / "logs" / "manifest_smoke.stage.json"
+    manifest_path.parent.mkdir(parents=True)
+    manifest_path.write_text(
+        yaml.safe_dump({section: [{}] for section in REQUIRED_TOP_LEVEL_SECTIONS}),
+        encoding="utf-8",
+    )
+    assembly_receipt = smoke_stage_output.with_name("manifest.stage.json")
+    assembly_receipt.parent.mkdir(parents=True)
+    assembly_receipt.write_text(json.dumps({"manifest_sha256": "0" * 64}), encoding="utf-8")
+
+    assert (
+        main(
+            [
+                "smoke-manifest",
+                str(manifest_path),
+                "--output",
+                str(smoke_output),
+                "--run-id",
+                "demo_001",
+                "--workspace-root",
+                str(tmp_path),
+                "--stage-output",
+                str(smoke_stage_output),
+            ]
+        )
+        == 1
+    )
+    smoke = json.loads(smoke_output.read_text(encoding="utf-8"))
+    assert smoke["manifest_hash_matches_assembly_receipt"] is False
+    assert "manifest SHA-256 does not match external assembly receipt" in smoke["semantic_errors"]
 
 
 def test_cli_assembles_run_manifest_from_workflow_evidence(tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
@@ -495,9 +650,31 @@ def test_cli_assembles_run_manifest_from_workflow_evidence(tmp_path: Path, capsy
             "status": "pass",
             "controlled_source_repo": {
                 "path": controlled_repo.as_posix(),
-                "ref": "controlled-source-demo-v0.1.1",
+                "ref": "controlled-source-demo-v0.1.2",
             },
             "controlled_scripts": [{"name": "run_script", "relative_path": "procs/run-script.sh"}],
+            "wrapper_factory_definition": [],
+            "controlled_artifacts": [
+                {
+                    "role": "controlled_script",
+                    "relative_path": relative_path,
+                    "selected_commit": "selected-commit",
+                    "blob_oid": f"blob-{index}",
+                    "file_mode": "100755",
+                    "size_bytes": 20,
+                    "sha256": str(index) * 64,
+                    "executable": True,
+                }
+                for index, relative_path in enumerate(
+                    (
+                        "procs/run-script.sh",
+                        "scripts/synthetic_sim_engine.sh",
+                        "scripts/extract_required.pl",
+                        "scripts/ad_hoc_extract.py",
+                    ),
+                    start=1,
+                )
+            ],
         },
     )
     _write_json(
@@ -636,7 +813,7 @@ def test_cli_assembles_run_manifest_from_workflow_evidence(tmp_path: Path, capsy
                 "--controlled-source-repo",
                 str(controlled_repo),
                 "--controlled-source-ref",
-                "controlled-source-demo-v0.1.1",
+                "controlled-source-demo-v0.1.2",
                 "--output",
                 str(manifest_path),
             ]
@@ -648,7 +825,7 @@ def test_cli_assembles_run_manifest_from_workflow_evidence(tmp_path: Path, capsy
     manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
     assert tuple(manifest)[: len(REQUIRED_TOP_LEVEL_SECTIONS)] == REQUIRED_TOP_LEVEL_SECTIONS
     assert manifest["run"]["run_id"] == "demo_001"
-    assert manifest["repositories"][1]["requested_ref"] == "controlled-source-demo-v0.1.1"
+    assert manifest["repositories"][1]["requested_ref"] == "controlled-source-demo-v0.1.2"
     assert manifest["repositories"][1]["tracked_script_paths"] == [
         "procs/run-script.sh",
         "scripts/synthetic_sim_engine.sh",
@@ -678,6 +855,8 @@ def test_cli_assembles_run_manifest_from_workflow_evidence(tmp_path: Path, capsy
     assert manifest["raw_simulation_outputs"][0]["sim_area"] == "lists"
     assert manifest["derived_products"][0]["producing_stage"] == "extract_required"
     assert manifest["validations"][0]["status"] == "pass"
+    assert manifest["validations"][0]["evidence_path"].endswith("required_extract.json")
+    assert len(manifest["validations"][0]["sha256"]) == 64
     assert {log["stream"] for log in manifest["logs"]} == {"stdout", "stderr"}
     assert manifest["hash_policy"]["algorithm"] == "sha256"
 
@@ -711,7 +890,7 @@ def _init_controlled_source_repo(path: Path) -> None:
         stdout=subprocess.DEVNULL,
     )
     subprocess.run(
-        ["git", "tag", "controlled-source-demo-v0.1.1"],
+        ["git", "tag", "controlled-source-demo-v0.1.2"],
         cwd=path,
         check=True,
         stdout=subprocess.DEVNULL,

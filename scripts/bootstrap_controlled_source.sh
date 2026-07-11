@@ -8,7 +8,7 @@ fixture_source_dir="$project_root/templates/controlled-source-demo/fixtures/cont
 proc_source_dir="$project_root/templates/controlled-source-demo/procs"
 script_source_dir="$project_root/templates/controlled-source-demo/scripts"
 template_root="$project_root/templates/controlled-source-demo"
-expected_tag=controlled-source-demo-v0.1.1
+expected_tag=controlled-source-demo-v0.1.2
 
 expected_files=(
   fixtures/controlled_inputs/dirA/ex1.dat

@@ -64,7 +64,7 @@ make bootstrap-controlled-source
 
 This command is intentionally strict. It creates `../controlled-source-demo` when
 missing, or verifies that an existing repo is clean, compatible, has the expected
-tracked files, and has tag `controlled-source-demo-v0.1.1`.
+tracked files, and has tag `controlled-source-demo-v0.1.2`.
 
 Treat this as local demo bootstrap only. A production-shaped factory run should
 resolve and verify existing controlled sources, not create upstream source repos.
@@ -78,7 +78,7 @@ ansible-playbook ansible/playbooks/run_synthetic_workflow.yml \
   -i ansible/inventory/localhost.ini \
   -e run_id=demo_001 \
   -e controlled_source_repo=../controlled-source-demo \
-  -e controlled_source_ref=controlled-source-demo-v0.1.1
+  -e controlled_source_ref=controlled-source-demo-v0.1.2
 ```
 
 For focused debugging, individual Make targets can also be run, but keep the same
@@ -93,12 +93,13 @@ targets:
 ```text
 Preflight gate -> Prepare simulation inputs -> Submit simulation
 -> Wait for simulation -> Collect scheduler evidence
--> Extract results -> Build reports -> Validate products
+-> Extract results -> Validate products -> Build reports
 ```
 
 The granular Make targets are still useful for debugging. The manifest records the
-small flow under `workflow.operator_flow` and keeps complete support, evidence,
-and finalization records under `stages`.
+small flow under `workflow.operator_flow`; `stages` contains every configured
+stage completed before manifest assembly. Manifest assembly and smoke evidence
+remain sibling receipts because embedding them would create self-reference.
 
 Normal Ansible runs do not call the simulation payload directly. They cross a
 local async mock-`bsub` boundary: `submit-mock-lsf` starts a scheduler-owned local
@@ -110,6 +111,11 @@ Choose a fresh `run_id` for each new execution. If a stage fails, the partial
 but the MVP does not guarantee safe resume or attempt-history semantics. After
 fixing the cause of the failure, start again with a new `run_id` unless resume
 behavior is added in a future change.
+
+Run IDs accept letters, digits, `.`, `_`, and `-`, and must begin with a letter
+or digit. Path separators and traversal are rejected. Configuration paths are
+also admitted only when they are relative and remain under their designated
+run, simulation, provenance, or repository root.
 
 Preflight is the admission gate and also the first evidence-producing target. A
 successful preflight may create `runs/{run_id}/provenance/preflight.json` and
@@ -198,22 +204,36 @@ Important sections to check:
   time range derived from stage evidence plus local user, host, platform, Python,
   and Git version context for the manifest assembly environment.
 - `repositories`: wrapper and controlled-source Git state, requested refs, resolved
-  commits, branch/tag/describe values, tracked script paths, and hashes.
+  commits, branch/tag/describe values, and per-artifact Git blob ID, mode, and
+  SHA-256 identities captured from the selected commits.
 - `controlled_source_gate`: preflight checks that passed before execution.
 - `scheduler`: local async mock-LSF submission, job id, final state, exit code,
   linked evidence paths for `submission.yaml`, `job-state.json`,
   `terminal-state.json`, `accounting.yaml`, scheduler logs, and the payload
-  `run_simulation.stage.json` evidence.
+  `run_simulation.stage.json` evidence, plus a passed coherent-receipt result.
 - `inputs` and `runtime_scripts`: where materialized inputs/scripts came from and
   how they were copied into the run.
-- `stages`: complete first-class attempt evidence for every configured workflow stage,
-  including support/orchestration steps; records commands, working directories,
+- `stages`: complete first-class attempt evidence for every configured stage
+  finished before assembly, including support/orchestration steps; records commands, working directories,
   statuses, return codes, log paths, evidence paths, timings, controlled scripts,
   inputs, and outputs.
 - `raw_simulation_outputs`: raw artifacts such as `sim-run-root/lists/dirC/sim-out.dat`.
 - `derived_products`: extracted CSVs and report files, with product area, role,
   producing stage, size, mtime, and SHA-256 hash.
-- `validations`: CSV shape validation evidence and pass/fail status.
+- `validations`: semantic CSV validation evidence, receipt paths and hashes, and
+  pass/fail status.
+
+After inspecting the manifest, compare the finalization receipts:
+
+```bash
+less runs/demo_001/provenance/logs/manifest.stage.json
+less runs/demo_001/provenance/validations/manifest_smoke.json
+```
+
+Both record the same final `manifest_sha256`. Smoke also checks stage
+uniqueness/order/success, on-disk artifact hashes, selected-source and producer
+links, scheduler coherence, and successful configured product validations. It
+does not rewrite `manifest.yaml`.
 
 Remember that `dirA`, `dirB`, and `dirC` repeat in multiple areas. Identify files
 by full relative path plus `sim_area` and `logical_group`, never by the leaf folder
@@ -241,6 +261,10 @@ Unsafe patterns:
 - Editing scripts inside `runs/{run_id}/sim-run-root/procs/` by hand.
 - Using hashes as a substitute for Git control.
 - Ignoring dirty controlled-source worktrees.
+
+The resulting evidence is locally captured and selected-commit-bound, not
+preserved by a trusted system. Do not describe it as signed, timestamped,
+tamper-evident, or immutably archived.
 
 ## Safe Extension Points
 
@@ -299,8 +323,9 @@ When adding a new stage or artifact:
 - **Real LSF tools are absent:** this is expected for the MVP; mock scheduler mode
   is used instead of `bsub`, `bjobs`, `bhist`, or `bacct`.
 
-The default controlled-source tag is `controlled-source-demo-v0.1.1`. This tag
-adds payload-owned deterministic runtime-delay support through
+The default controlled-source tag is `controlled-source-demo-v0.1.2`. This tag
+adds atomic required/ad hoc extractor publication and retains payload-owned
+deterministic runtime-delay support through
 `SYNTHETIC_SIM_RUNTIME_DELAY_SECONDS` or the
 `SYNTHETIC_SIM_RUNTIME_DELAY_MIN_SECONDS` / `MAX_SECONDS` range. The wrapper
 does not add fake scheduler latency; async mock-scheduler runs should pass delay
@@ -309,7 +334,7 @@ configuration into the controlled payload.
 If the controlled payload contract changes again, update the controlled-source
 template and default ref together. `make bootstrap-controlled-source` should create
 the new tag for missing demo repos, verify an existing clean compatible repo, and
-avoid rewriting older tags such as `controlled-source-demo-v0.1.0`.
+  avoid rewriting older tags such as `controlled-source-demo-v0.1.1`.
 
 ## Mock Scheduler Boundary and Deferred Production Work
 
@@ -363,11 +388,12 @@ Read these before treating run evidence as more than it claims to be:
   evidence after the target completes rather than capturing the exact
   Make/Ansible process streams. Executable simulation and extraction stages
   capture observed return codes and stdout/stderr directly.
-- **No time-of-check/time-of-use lock.** Extraction stages execute scripts
-  from the live controlled-source worktree after preflight has verified the
-  requested ref and clean state. The local MVP assumes the worktree remains
-  unchanged between Make targets; it does not re-hash scripts at execution
-  time.
+- **Selected-commit binding is local, not immutable preservation.** Preflight
+  resolves artifact identities from the selected Git tree. Inputs and code are
+  copied into read-only run-local paths and rechecked for mode/hash immediately
+  before execution, so stages do not execute scripts from the live source
+  worktree. Those run-local files and receipts remain mutable to a sufficiently
+  privileged local user because no signing or immutable archive is implemented.
 - **Evidence is host-bound.** Manifest evidence may include absolute local
   host paths. This MVP produces local evidence, not a portable archive
   format, so those paths are accepted context rather than normalized or

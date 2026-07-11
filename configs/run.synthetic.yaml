@@ -15,6 +15,7 @@ repositories:
       - ansible/playbooks/run_synthetic_workflow.yml
       - configs/run.synthetic.yaml
       - configs/expected_shape.required_extract.yaml
+      - configs/expected_shape.ad_hoc_extract.yaml
       - pyproject.toml
       - scripts/bootstrap_controlled_source.sh
       - src/provenance/__init__.py
@@ -24,6 +25,7 @@ repositories:
       - src/provenance/hashing.py
       - src/provenance/inventory.py
       - src/provenance/manifest.py
+      - src/provenance/paths.py
       - src/provenance/preflight.py
       - src/provenance/reports.py
       - src/provenance/scheduler.py
@@ -36,7 +38,7 @@ repositories:
     path_variable: controlled_source_repo
     default_path: ../controlled-source-demo
     ref_variable: controlled_source_ref
-    default_ref: controlled-source-demo-v0.1.1
+    default_ref: controlled-source-demo-v0.1.2
     require_git_worktree: true
     require_clean_worktree: true
 layout:
@@ -70,15 +72,21 @@ controlled_scripts:
   synthetic_sim_engine:
     repository: controlled_source
     relative_path: scripts/synthetic_sim_engine.sh
+    materialized_path: provenance/controlled-source/scripts/synthetic_sim_engine.sh
     executable: true
+    materialization_mode: copy_from_controlled_source
   extract_required:
     repository: controlled_source
     relative_path: scripts/extract_required.pl
+    materialized_path: provenance/controlled-source/scripts/extract_required.pl
     executable: true
+    materialization_mode: copy_from_controlled_source
   ad_hoc_extract:
     repository: controlled_source
     relative_path: scripts/ad_hoc_extract.py
+    materialized_path: provenance/controlled-source/scripts/ad_hoc_extract.py
     executable: true
+    materialization_mode: copy_from_controlled_source
 approved_command_paths:
   controlled_source:
     - procs/run-script.sh
@@ -88,6 +96,22 @@ approved_command_paths:
   wrapper:
     - Makefile
     - src/provenance/cli.py
+approved_make_targets:
+  - preflight
+  - prepare-workspace
+  - materialize-inputs
+  - materialize-procs
+  - inventory-pre
+  - submit-mock-lsf
+  - wait-mock-lsf
+  - collect-mock-lsf
+  - extract-required
+  - extract-ad-hoc
+  - build-reports
+  - validate
+  - inventory-post
+  - manifest
+  - manifest-smoke
 materialization:
   inputs:
     source_root: fixtures/controlled_inputs
@@ -103,6 +127,9 @@ materialization:
     mode: copy_from_controlled_source
   runtime_scripts:
     - run_script
+    - synthetic_sim_engine
+    - extract_required
+    - ad_hoc_extract
 scheduler:
   mode: mock_lsf
   emulator_execution_mode: local_async
@@ -308,26 +335,10 @@ stages:
       - sim-run-root/lists/dirC/sim-out.dat
     outputs:
       - provenance/products/extracted/ad_hoc.csv
-  - name: build_reports
-    display_name: Build report products
-    lifecycle_class: factory
-    display_order: 110
-    operator_visible: true
-    command: make build-reports
-    working_directory: wrapper_repo
-    command_kind: wrapper_make_target
-    approved_command_path: Makefile
-    inputs:
-      - provenance/products/extracted/required.csv
-      - provenance/products/extracted/ad_hoc.csv
-    outputs:
-      - provenance/products/reports/summary.xlsx
-      - provenance/products/reports/chart.png
-      - provenance/products/reports/briefing.pptx
   - name: validate
     display_name: Validate products
     lifecycle_class: factory
-    display_order: 120
+    display_order: 110
     operator_visible: true
     command: make validate
     working_directory: wrapper_repo
@@ -335,9 +346,30 @@ stages:
     approved_command_path: Makefile
     inputs:
       - provenance/products/extracted/required.csv
+      - provenance/products/extracted/ad_hoc.csv
       - configs/expected_shape.required_extract.yaml
+      - configs/expected_shape.ad_hoc_extract.yaml
     outputs:
       - provenance/validations/required_extract.json
+      - provenance/validations/ad_hoc_extract.json
+  - name: build_reports
+    display_name: Build report products
+    lifecycle_class: factory
+    display_order: 120
+    operator_visible: true
+    command: make build-reports
+    working_directory: wrapper_repo
+    command_kind: wrapper_make_target
+    approved_command_path: Makefile
+    inputs:
+      - provenance/validations/required_extract.json
+      - provenance/validations/ad_hoc_extract.json
+      - provenance/products/extracted/required.csv
+      - provenance/products/extracted/ad_hoc.csv
+    outputs:
+      - provenance/products/reports/summary.xlsx
+      - provenance/products/reports/chart.png
+      - provenance/products/reports/briefing.pptx
   - name: inventory_post
     display_name: Inventory output evidence
     lifecycle_class: finalization
@@ -394,6 +426,10 @@ validations:
     config_path: configs/expected_shape.required_extract.yaml
     product_path: provenance/products/extracted/required.csv
     evidence_path: provenance/validations/required_extract.json
+  ad_hoc_extract:
+    config_path: configs/expected_shape.ad_hoc_extract.yaml
+    product_path: provenance/products/extracted/ad_hoc.csv
+    evidence_path: provenance/validations/ad_hoc_extract.json
 manifest:
   output_path: provenance/manifest.yaml
   required_top_level_sections:

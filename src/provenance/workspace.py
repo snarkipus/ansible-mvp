@@ -2,14 +2,21 @@
 
 from __future__ import annotations
 
-import shutil
+import json
+import stat
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from provenance.config import read_config_mapping
-from provenance.git_state import capture_repository_state, resolve_ref
-from provenance.hashing import hash_artifact
+from provenance.config import read_config_mapping, validate_run_configuration
+from provenance.git_state import (
+    SelectedTreeArtifactIdentity,
+    capture_repository_state,
+    resolve_ref,
+    selected_tree_artifact_identity,
+)
+from provenance.hashing import hash_artifact, sha256_file
+from provenance.paths import resolve_layout_path, resolve_root_relative_path, validate_run_id
 
 
 @dataclass(frozen=True)
@@ -45,7 +52,11 @@ class MaterializedArtifact:
     source_resolved_commit: str
     source_head_commit: str | None
     source_path: Path
+    source_blob_oid: str
+    source_file_mode: str
+    source_sha256: str
     destination_path: Path
+    destination_file_mode: str
     materialization_mode: str
     sha256: str | None
     hash_status: str
@@ -62,7 +73,11 @@ class MaterializedArtifact:
             "source_resolved_commit": self.source_resolved_commit,
             "source_head_commit": self.source_head_commit,
             "source_path": self.source_path.as_posix(),
+            "source_blob_oid": self.source_blob_oid,
+            "source_file_mode": self.source_file_mode,
+            "source_sha256": self.source_sha256,
             "destination_path": self.destination_path.as_posix(),
+            "destination_file_mode": self.destination_file_mode,
             "materialization_mode": self.materialization_mode,
             "sha256": self.sha256,
             "hash_status": self.hash_status,
@@ -96,26 +111,34 @@ def prepare_workspace(
 ) -> WorkspacePreparationResult:
     """Create separated simulation and provenance workspaces for a run."""
 
-    if not run_id:
-        raise ValueError("run_id must be non-empty")
-
+    validate_run_id(run_id)
     root = Path(workspace_root).expanduser().resolve()
     config = _read_yaml_mapping(Path(config_path))
+    validate_run_configuration(
+        config,
+        workspace_root=root,
+        controlled_source_root=root,
+        run_id=run_id,
+    )
     layout = _mapping(config.get("layout"), "layout")
 
-    run_root = root / _format_layout_path(layout, "run_root", run_id)
-    sim_run_root = root / _format_layout_path(layout, "sim_run_root", run_id)
-    provenance_root = root / _format_layout_path(layout, "provenance_root", run_id)
+    run_root = resolve_layout_path(root, layout, "run_root", run_id)
+    sim_run_root = resolve_layout_path(root, layout, "sim_run_root", run_id)
+    provenance_root = resolve_layout_path(root, layout, "provenance_root", run_id)
 
     if provenance_root == sim_run_root or provenance_root.is_relative_to(sim_run_root):
         raise ValueError("provenance_root must not be inside sim_run_root")
 
     simulation_directories = tuple(
-        sim_run_root / area
+        resolve_root_relative_path(sim_run_root, area, field_name="layout.simulation_areas")
         for area in _string_list(layout.get("simulation_areas"), "layout.simulation_areas")
     )
     provenance_directories = tuple(
-        provenance_root / relative_path
+        resolve_root_relative_path(
+            provenance_root,
+            relative_path,
+            field_name="layout.provenance_directories",
+        )
         for relative_path in _string_list(
             layout.get("provenance_directories"), "layout.provenance_directories"
         )
@@ -160,7 +183,7 @@ def materialize_inputs(
     source_root = Path(_non_empty_string(inputs.get("source_root"), "source_root"))
     destination_root = Path(_non_empty_string(inputs.get("destination_root"), "destination_root"))
     mode = _non_empty_string(inputs.get("mode"), "mode")
-    sim_run_root = root / _format_layout_path(layout, "sim_run_root", run_id)
+    sim_run_root = resolve_layout_path(root, layout, "sim_run_root", run_id)
 
     artifacts: list[MaterializedArtifact] = []
     for group in _string_list(
@@ -169,13 +192,11 @@ def materialize_inputs(
         for filename in _string_list(inputs.get("files"), "materialization.inputs.files"):
             source_relative = source_root / group / filename
             destination_relative = destination_root / group / filename
-            source = controlled_root / source_relative
             destination = sim_run_root.parent / destination_relative
             artifacts.append(
-                _copy_controlled_file(
+                _materialize_selected_file(
                     root=root,
                     controlled_root=controlled_root,
-                    source=source,
                     source_relative=source_relative,
                     destination=destination,
                     source_ref=controlled_source_ref,
@@ -188,7 +209,71 @@ def materialize_inputs(
                 )
             )
 
-    return MaterializationResult(run_id=run_id, artifacts=tuple(artifacts))
+    result = MaterializationResult(run_id=run_id, artifacts=tuple(artifacts))
+    _write_materialization_evidence(root, config, run_id, "materialized_inputs.json", result)
+    return result
+
+
+def verify_materialization_evidence(
+    evidence_path: Path | str,
+    *,
+    workspace_root: Path | str,
+) -> tuple[dict[str, Any], ...]:
+    """Verify materialized bytes and modes against their selected-tree identities."""
+
+    path = Path(evidence_path)
+    if not path.is_absolute():
+        path = Path(workspace_root).expanduser().resolve() / path
+    if not path.is_file():
+        raise ValueError(f"materialization evidence is missing: {path}")
+    loaded = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(loaded, dict) or not isinstance(loaded.get("artifacts"), list):
+        raise ValueError(f"materialization evidence must contain an artifacts list: {path}")
+
+    root = Path(workspace_root).expanduser().resolve()
+    verified: list[dict[str, Any]] = []
+    for raw_artifact in loaded["artifacts"]:
+        if not isinstance(raw_artifact, dict):
+            raise ValueError(f"materialization artifact must be a mapping: {path}")
+        destination_value = raw_artifact.get("destination_path")
+        expected_hash = raw_artifact.get("source_sha256")
+        expected_mode = raw_artifact.get("destination_file_mode")
+        if not all(
+            isinstance(value, str) and value for value in (destination_value, expected_hash)
+        ):
+            raise ValueError(f"materialization artifact identity is incomplete: {path}")
+        destination = root / str(destination_value)
+        if not destination.is_file():
+            raise ValueError(f"materialized artifact is missing: {destination_value}")
+        actual_hash = sha256_file(destination)
+        if actual_hash != expected_hash:
+            raise ValueError(
+                f"materialized artifact integrity mismatch: {destination_value}; "
+                f"expected {expected_hash}, got {actual_hash}"
+            )
+        actual_mode = f"{stat.S_IMODE(destination.stat().st_mode):04o}"
+        if isinstance(expected_mode, str) and actual_mode != expected_mode:
+            raise ValueError(
+                f"materialized artifact mode mismatch: {destination_value}; "
+                f"expected {expected_mode}, got {actual_mode}"
+            )
+        verified.append(raw_artifact)
+    return tuple(verified)
+
+
+def _write_materialization_evidence(
+    root: Path,
+    config: dict[str, Any],
+    run_id: str,
+    filename: str,
+    result: MaterializationResult,
+) -> None:
+    provenance_root = resolve_layout_path(
+        root, _mapping(config.get("layout"), "layout"), "provenance_root", run_id
+    )
+    path = provenance_root / "inventories" / filename
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(result.to_dict(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def materialize_runtime_scripts(
@@ -214,7 +299,7 @@ def materialize_runtime_scripts(
         _mapping(config.get("materialization"), "materialization").get("runtime_scripts"),
         "materialization.runtime_scripts",
     )
-    sim_run_root = root / _format_layout_path(layout, "sim_run_root", run_id)
+    run_root = resolve_layout_path(root, layout, "run_root", run_id)
 
     artifacts: list[MaterializedArtifact] = []
     for script_name in runtime_script_names:
@@ -224,32 +309,28 @@ def materialize_runtime_scripts(
             _non_empty_string(script.get("materialized_path"), "materialized_path")
         )
         mode = _non_empty_string(script.get("materialization_mode"), "materialization_mode")
-        destination = sim_run_root.parent / materialized_path
+        destination = run_root / materialized_path
         artifacts.append(
-            _copy_controlled_file(
+            _materialize_selected_file(
                 root=root,
                 controlled_root=controlled_root,
-                source=controlled_root / source_relative,
                 source_relative=source_relative,
                 destination=destination,
                 source_ref=controlled_source_ref,
                 resolved_commit=resolved_commit,
                 head_commit=head_commit,
                 mode=mode,
-                sim_area="procs",
+                sim_area="procs" if materialized_path.parts[0] == "sim-run-root" else None,
                 logical_group=None,
-                role="runtime_script",
+                role="runtime_script" if script_name == "run_script" else "controlled_code",
             )
         )
 
-    return MaterializationResult(run_id=run_id, artifacts=tuple(artifacts))
-
-
-def _format_layout_path(layout: dict[str, Any], key: str, run_id: str) -> Path:
-    value = layout.get(key)
-    if not isinstance(value, str) or not value:
-        raise ValueError(f"layout.{key} must be a non-empty string")
-    return Path(value.format(run_id=run_id))
+    result = MaterializationResult(run_id=run_id, artifacts=tuple(artifacts))
+    _write_materialization_evidence(
+        root, config, run_id, "materialized_runtime_scripts.json", result
+    )
+    return result
 
 
 def _materialization_context(
@@ -260,8 +341,7 @@ def _materialization_context(
     controlled_source_ref: str,
     workspace_root: Path | str,
 ) -> tuple[Path, Path, str, str | None, dict[str, Any]]:
-    if not run_id:
-        raise ValueError("run_id must be non-empty")
+    validate_run_id(run_id)
     root = Path(workspace_root).expanduser().resolve()
     controlled_state = capture_repository_state(controlled_source_repo)
     if not controlled_state.is_git_worktree or controlled_state.top_level is None:
@@ -274,11 +354,6 @@ def _materialization_context(
             f"controlled source repository must be clean before materialization: {dirty}"
         )
     resolved_commit = resolve_ref(controlled_state.top_level, controlled_source_ref).resolved_commit
-    if controlled_state.head_commit != resolved_commit:
-        raise ValueError(
-            "controlled source HEAD must match controlled_source_ref before materialization: "
-            f"HEAD={controlled_state.head_commit}, ref={resolved_commit}"
-        )
     return (
         root,
         controlled_state.top_level,
@@ -288,33 +363,42 @@ def _materialization_context(
     )
 
 
-def _copy_controlled_file(
+def _materialize_selected_file(
     *,
     root: Path,
     controlled_root: Path,
-    source: Path,
     source_relative: Path,
     destination: Path,
     source_ref: str,
     resolved_commit: str,
     head_commit: str | None,
     mode: str,
-    sim_area: str,
+    sim_area: str | None,
     logical_group: str | None,
     role: str,
 ) -> MaterializedArtifact:
-    if not source.is_file():
-        raise FileNotFoundError(f"controlled source materialization input is missing: {source}")
+    identity: SelectedTreeArtifactIdentity = selected_tree_artifact_identity(
+        controlled_root, resolved_commit, source_relative
+    )
     destination.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(source, destination)
+    destination.write_bytes(identity.content)
+    destination.chmod(0o555 if identity.executable else 0o444)
     hash_record = hash_artifact(destination, display_path=destination.relative_to(root).as_posix())
+    if hash_record.sha256 != identity.sha256:
+        raise ValueError(
+            f"materialized artifact hash differs from selected commit: {source_relative}"
+        )
     return MaterializedArtifact(
         source_repository=controlled_root,
         source_ref=source_ref,
         source_resolved_commit=resolved_commit,
         source_head_commit=head_commit,
         source_path=source_relative,
+        source_blob_oid=identity.blob_oid,
+        source_file_mode=identity.file_mode,
+        source_sha256=identity.sha256,
         destination_path=destination.relative_to(root),
+        destination_file_mode="0555" if identity.executable else "0444",
         materialization_mode=mode,
         sha256=hash_record.sha256,
         hash_status=hash_record.status.value,

@@ -1,7 +1,7 @@
 ---
 default_run_id: demo_001
 default_controlled_source_repo: ../controlled-source-demo
-default_controlled_source_ref: controlled-source-demo-v0.1.1
+default_controlled_source_ref: controlled-source-demo-v0.1.2
 
 provenance_wrapper_repo: "{{ playbook_dir }}/../.."
 run_config_path: configs/run.synthetic.yaml

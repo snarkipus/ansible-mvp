@@ -7,6 +7,7 @@ missing repositories, unresolved refs, dirty worktrees, and untracked scripts.
 
 from __future__ import annotations
 
+import hashlib
 import subprocess
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -103,6 +104,40 @@ class ScriptIdentity:
         return self.exists and self.is_tracked and not self.is_dirty
 
 
+@dataclass(frozen=True)
+class SelectedTreeArtifactIdentity:
+    """Identity and immutable bytes for one regular file in a selected Git tree."""
+
+    repository: Path
+    selected_commit: str
+    relative_path: str
+    blob_oid: str
+    file_mode: str
+    size_bytes: int
+    sha256: str
+    content: bytes
+
+    @property
+    def executable(self) -> bool:
+        """Return whether the selected tree records an executable regular file."""
+
+        return self.file_mode == "100755"
+
+    def to_dict(self) -> dict[str, str | int | bool]:
+        """Return manifest-ready identity fields without embedding file bytes."""
+
+        return {
+            "repository": self.repository.as_posix(),
+            "selected_commit": self.selected_commit,
+            "relative_path": self.relative_path,
+            "blob_oid": self.blob_oid,
+            "file_mode": self.file_mode,
+            "size_bytes": self.size_bytes,
+            "sha256": self.sha256,
+            "executable": self.executable,
+        }
+
+
 def capture_repository_state(repo_path: Path | str) -> RepositoryState:
     """Capture existence, Git identity, and dirty status for ``repo_path``."""
 
@@ -158,6 +193,45 @@ def resolve_ref(repo_path: Path | str, ref: str) -> RefResolution:
     if not resolved:
         raise GitStateError(f"ref does not resolve to a commit: {ref}")
     return RefResolution(ref=ref, resolved_commit=resolved)
+
+
+def selected_tree_artifact_identity(
+    repo_path: Path | str,
+    commit: str,
+    relative_path: str | Path,
+) -> SelectedTreeArtifactIdentity:
+    """Read one regular file identity and bytes from ``commit``, never the worktree."""
+
+    repo = _require_git_worktree(repo_path)
+    resolved_commit = resolve_ref(repo, commit).resolved_commit
+    rel = _normalize_relative_path(relative_path)
+    if rel in {"", "."}:
+        raise GitStateError("selected-tree artifact path must identify a regular file")
+    tree_result = _git(repo, "ls-tree", "-z", resolved_commit, "--", rel, check=False)
+    entry = tree_result.stdout.rstrip("\0")
+    if tree_result.returncode != 0 or not entry:
+        raise GitStateError(f"path is absent from selected commit {resolved_commit}: {rel}")
+    metadata, _, selected_path = entry.partition("\t")
+    parts = metadata.split()
+    if len(parts) != 3 or selected_path != rel:
+        raise GitStateError(f"unexpected Git tree entry for {rel} at {resolved_commit}")
+    mode, object_type, blob_oid = parts
+    if object_type != "blob" or mode not in {"100644", "100755"}:
+        raise GitStateError(
+            f"selected-tree artifact must be a regular file: {rel} "
+            f"(mode={mode}, type={object_type})"
+        )
+    content = _git_bytes(repo, "cat-file", "blob", blob_oid)
+    return SelectedTreeArtifactIdentity(
+        repository=repo,
+        selected_commit=resolved_commit,
+        relative_path=rel,
+        blob_oid=blob_oid,
+        file_mode=mode,
+        size_bytes=len(content),
+        sha256=hashlib.sha256(content).hexdigest(),
+        content=content,
+    )
 
 
 def tracked_file_state(repo_path: Path | str, relative_path: str | Path) -> TrackedFileState:
@@ -283,3 +357,18 @@ def _git(repo_path: Path, *args: str, check: bool = True) -> subprocess.Complete
         command = " ".join(["git", "-C", str(repo_path), *args])
         raise GitStateError(f"Git command failed ({command}): {result.stderr.strip()}")
     return result
+
+
+def _git_bytes(repo_path: Path, *args: str) -> bytes:
+    result = subprocess.run(
+        ["git", "-C", str(repo_path), *args],
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    if result.returncode != 0:
+        command = " ".join(["git", "-C", str(repo_path), *args])
+        raise GitStateError(
+            f"Git command failed ({command}): {result.stderr.decode(errors='replace').strip()}"
+        )
+    return result.stdout

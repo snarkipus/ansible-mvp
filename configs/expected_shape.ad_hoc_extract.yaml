@@ -1,0 +1,23 @@
+schema_version: "0.1"
+product:
+  name: ad_hoc_extract
+  relative_path: provenance/products/extracted/ad_hoc.csv
+  display_path: products/extracted/ad_hoc.csv
+expectations:
+  expected_header:
+    - logical_group
+    - input_count
+    - total_bytes
+  expected_column_count: 3
+  expected_data_rows: 3
+  non_empty: true
+  expected_column_values:
+    logical_group:
+      - dirA
+      - dirB
+      - dirC
+  integer_columns:
+    - input_count
+    - total_bytes
+evidence:
+  output_path: provenance/validations/ad_hoc_extract.json

@@ -123,3 +123,12 @@ Rollback is a normal Git revert before release. Generated runs created under the
 ## Open Questions
 
 None required before implementation. If formal manifest schema work (`ansible-mvp-nkr`) starts concurrently, coordinate field names but do not make this hardening change depend on completing that future capability.
+
+## Implementation Reconciliation
+
+No intentional behavioral deviations remain between this change, the
+synchronized main specifications, and the implementation. In this MVP,
+"immutable per-run code" means read-only materialization from an identified
+selected commit with pre-execution mode and SHA-256 verification. It does not
+mean tamper-proof preservation: signing, trusted timestamps, and immutable
+archival remain unimplemented and are stated as assurance limitations.

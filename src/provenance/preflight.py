@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from provenance.config import read_config_mapping
+from provenance.config import read_config_mapping, validate_run_configuration
 from provenance.git_state import (
     GitStateError,
     ScriptIdentity,
@@ -15,6 +15,7 @@ from provenance.git_state import (
     capture_repository_state,
     resolve_ref,
     script_identity,
+    selected_tree_artifact_identity,
 )
 
 
@@ -32,8 +33,10 @@ class PreflightResult:
 
     status: str
     wrapper_repo: dict[str, Any]
+    wrapper_factory_definition: list[dict[str, Any]]
     controlled_source_repo: dict[str, Any]
     controlled_scripts: list[dict[str, Any]]
+    controlled_artifacts: list[dict[str, Any]]
     stages: list[dict[str, Any]]
 
     def to_dict(self) -> dict[str, Any]:
@@ -42,8 +45,10 @@ class PreflightResult:
         return {
             "status": self.status,
             "wrapper_repo": self.wrapper_repo,
+            "wrapper_factory_definition": self.wrapper_factory_definition,
             "controlled_source_repo": self.controlled_source_repo,
             "controlled_scripts": self.controlled_scripts,
+            "controlled_artifacts": self.controlled_artifacts,
             "stages": self.stages,
         }
 
@@ -54,6 +59,7 @@ def run_preflight(
     wrapper_repo: Path | str,
     controlled_source_repo: Path | str,
     controlled_source_ref: str,
+    run_id: str = "demo_001",
 ) -> PreflightResult:
     """Validate repositories, controlled paths, scripts, and stage commands."""
 
@@ -66,6 +72,16 @@ def run_preflight(
     controlled_state = capture_repository_state(controlled_path)
     wrapper_repo_root = wrapper_state.top_level or wrapper_path
     controlled_repo_root = controlled_state.top_level or controlled_path
+
+    try:
+        validate_run_configuration(
+            config,
+            workspace_root=wrapper_repo_root,
+            controlled_source_root=controlled_repo_root,
+            run_id=run_id,
+        )
+    except ValueError as exc:
+        failures.append(f"run configuration is invalid: {exc}")
 
     if not wrapper_state.exists:
         failures.append(f"wrapper repository path does not exist: {wrapper_state.path}")
@@ -102,9 +118,19 @@ def run_preflight(
             assert_clean_tracked_files(wrapper_repo_root, wrapper_controlled_paths)
         except GitStateError as exc:
             failures.append(str(exc))
+    wrapper_factory_definition = _selected_tree_inventory(
+        wrapper_repo_root,
+        wrapper_state.head_commit,
+        wrapper_controlled_paths,
+        role="wrapper_factory_definition",
+        failures=failures,
+    )
 
     controlled_scripts, script_identities = _validate_controlled_scripts(
         config, controlled_repo_root, controlled_state.is_git_worktree, failures
+    )
+    controlled_artifacts = _validate_selected_commit_artifacts(
+        config, controlled_repo_root, resolved_ref, failures
     )
     stages = _validate_stages(config, script_identities, failures)
     _validate_scheduler_payload(config, failures)
@@ -120,6 +146,7 @@ def run_preflight(
             "clean_policy": wrapper_config.get("clean_policy", "configured_paths_only"),
             "controlled_paths": wrapper_controlled_paths,
         },
+        wrapper_factory_definition=wrapper_factory_definition,
         controlled_source_repo={
             "path": controlled_repo_root.as_posix(),
             "ref": controlled_source_ref,
@@ -128,6 +155,7 @@ def run_preflight(
             "is_clean": controlled_state.is_clean,
         },
         controlled_scripts=controlled_scripts,
+        controlled_artifacts=controlled_artifacts,
         stages=stages,
     )
 
@@ -180,6 +208,70 @@ def _validate_controlled_scripts(
             }
         )
     return payloads, identities
+
+
+def _selected_tree_inventory(
+    repository: Path,
+    selected_commit: str | None,
+    relative_paths: list[str],
+    *,
+    role: str,
+    failures: list[str],
+) -> list[dict[str, Any]]:
+    if selected_commit is None:
+        return []
+    records: list[dict[str, Any]] = []
+    for relative_path in relative_paths:
+        try:
+            identity = selected_tree_artifact_identity(repository, selected_commit, relative_path)
+        except GitStateError as exc:
+            failures.append(f"{role} failed selected-commit checks: {exc}")
+            continue
+        record: dict[str, Any] = identity.to_dict()
+        record["role"] = role
+        records.append(record)
+    return records
+
+
+def _validate_selected_commit_artifacts(
+    config: dict[str, Any],
+    controlled_repo_root: Path,
+    selected_commit: str | None,
+    failures: list[str],
+) -> list[dict[str, Any]]:
+    if selected_commit is None:
+        return []
+
+    declarations: list[tuple[str, str, str | None]] = []
+    scripts = _mapping(config.get("controlled_scripts"), "controlled_scripts")
+    for name, raw_script in scripts.items():
+        script = _mapping(raw_script, f"controlled_scripts.{name}")
+        relative_path = script.get("relative_path")
+        if isinstance(relative_path, str) and relative_path:
+            declarations.append((relative_path, "controlled_script", str(name)))
+
+    materialization = _mapping(config.get("materialization"), "materialization")
+    inputs = _mapping(materialization.get("inputs"), "materialization.inputs")
+    source_root = Path(_non_empty_string(inputs.get("source_root"), "source_root"))
+    for group in _string_list(
+        inputs.get("logical_groups"), "materialization.inputs.logical_groups"
+    ):
+        for filename in _string_list(inputs.get("files"), "materialization.inputs.files"):
+            declarations.append(((source_root / group / filename).as_posix(), "input", group))
+
+    artifacts: list[dict[str, Any]] = []
+    for relative_path, role, logical_group in declarations:
+        try:
+            identity = selected_tree_artifact_identity(
+                controlled_repo_root, selected_commit, relative_path
+            )
+        except GitStateError as exc:
+            failures.append(f"controlled {role} failed selected-commit checks: {exc}")
+            continue
+        payload: dict[str, Any] = identity.to_dict()
+        payload.update({"role": role, "logical_group": logical_group})
+        artifacts.append(payload)
+    return artifacts
 
 
 def _validate_stages(
@@ -376,4 +468,10 @@ def _list(value: object, name: str) -> list[object]:
 def _string_list(value: object, name: str) -> list[str]:
     if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
         raise ValueError(f"{name} must be a list of strings")
+    return value
+
+
+def _non_empty_string(value: object, name: str) -> str:
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"{name} must be a non-empty string")
     return value

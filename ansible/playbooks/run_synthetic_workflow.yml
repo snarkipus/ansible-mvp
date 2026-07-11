@@ -15,11 +15,13 @@
       ansible.builtin.assert:
         that:
           - workflow_run_id | length > 0
+          - workflow_run_id is match('^[A-Za-z0-9][A-Za-z0-9._-]*$')
           - workflow_controlled_source_repo | length > 0
           - workflow_controlled_source_ref | length > 0
         fail_msg: >-
-          run_id, controlled_source_repo, and controlled_source_ref must resolve
-          to non-empty values for the synthetic provenance workflow.
+          run_id must match [A-Za-z0-9][A-Za-z0-9._-]*, and
+          controlled_source_repo and controlled_source_ref must resolve to
+          non-empty values for the synthetic provenance workflow.
 
     - name: Verify the wrapper Makefile exists
       ansible.builtin.stat:

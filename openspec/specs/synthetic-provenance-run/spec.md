@@ -3,26 +3,30 @@
 Define the local synthetic provenance workflow contract, including controlled source bootstrap, canonical simulation workspace layout, provenance sidecar separation, mock scheduler metadata, clean run execution, and handoff guidance.
 ## Requirements
 ### Requirement: Controlled source demo can be bootstrapped
-The system SHALL provide a bootstrap command that creates or verifies a sibling `../controlled-source-demo` Git repository for the synthetic workflow.
+The system SHALL provide a bootstrap command that creates or verifies a sibling `../controlled-source-demo` Git repository at the immutable payload contract required by the synthetic workflow.
 
 #### Scenario: Bootstrap creates demo repository
 - **WHEN** `make bootstrap-controlled-source` is run in a workspace without `../controlled-source-demo`
-- **THEN** the command creates a Git repository containing synthetic scripts, runtime procs, fixtures, an initial commit, and tag `controlled-source-demo-v0.1.0`
+- **THEN** the command creates a Git repository containing synthetic scripts, runtime procs, fixtures, an initial commit, and tag `controlled-source-demo-v0.1.2`
 
 #### Scenario: Bootstrap verifies existing demo repository
-- **WHEN** `make bootstrap-controlled-source` is run and a compatible clean `../controlled-source-demo` already exists
+- **WHEN** `make bootstrap-controlled-source` is run and a compatible clean `../controlled-source-demo` contains the expected tracked content and `controlled-source-demo-v0.1.2` tag
 - **THEN** the command leaves the repository usable for the documented run command
 
 #### Scenario: Bootstrap rejects incompatible demo repository
-- **WHEN** `../controlled-source-demo` exists but is not a clean Git repository with expected tracked scripts, fixtures, and tag `controlled-source-demo-v0.1.0`
-- **THEN** bootstrap fails with a clear compatibility error instead of overwriting the repository
+- **WHEN** `../controlled-source-demo` exists but is not a clean Git repository with expected tracked scripts, fixtures, and tag `controlled-source-demo-v0.1.2`
+- **THEN** bootstrap fails with a clear compatibility error instead of overwriting the repository or mutating an older tag
 
 ### Requirement: Run workspace preserves canonical simulation layout
-The system SHALL create `runs/{run_id}/sim-run-root/` with `input/`, `lists`, `files`, and `procs/` areas for each run.
+The system SHALL create `runs/{run_id}/sim-run-root/` with `input/`, `lists`, `files`, and `procs/` areas for each valid, safely contained run identifier.
 
 #### Scenario: Run workspace is prepared
 - **WHEN** a valid run starts with `run_id=demo_001`
 - **THEN** the workspace contains `runs/demo_001/sim-run-root/input`, `lists`, `files`, and `procs`
+
+#### Scenario: Unsafe run identifier is rejected
+- **WHEN** a run identifier contains traversal, a path separator, or other characters outside the configured safe grammar
+- **THEN** the workflow fails before creating any path for that run
 
 ### Requirement: Repeated logical groups are represented by full artifact identity
 The system SHALL model repeated `dirA`, `dirB`, and `dirC` groups by full relative path plus simulation area and logical group.
@@ -195,16 +199,21 @@ The system SHALL use Ansible for environment admission, per-stage Make target se
 - **THEN** scheduler polling, timeout handling, and scheduler evidence writing are performed by Python behind the `wait-mock-lsf` Make target rather than by Ansible retry logic
 
 ### Requirement: Downstream extraction waits for scheduler success
-The system SHALL prevent downstream extraction from running unless the mock scheduler job reaches terminal `DONE` state.
+The system SHALL prevent downstream extraction unless submission, terminal state, normalized job state, accounting, payload execution evidence, and produced raw output form one coherent successful scheduler receipt.
 
-#### Scenario: Extraction follows successful scheduler completion
-- **WHEN** the mock scheduler job reaches terminal `DONE` and accounting evidence is collected
-- **THEN** downstream extraction stages may run against the produced raw simulation output
+#### Scenario: Extraction follows coherent scheduler completion
+- **WHEN** all scheduler records identify one submission receipt, the expected run and job, monotonic lifecycle timestamps, terminal state `DONE`, zero exit status, successful payload evidence, linked accounting, and matching raw-output identity
+- **THEN** downstream extraction stages may run against the verified raw simulation output
 
 #### Scenario: Extraction is blocked after scheduler failure
 - **WHEN** the payload exits nonzero, the wait stage times out, the process vanishes, or the job state is not terminal `DONE`
 - **THEN** downstream extraction does not run
 - **AND** scheduler evidence records the failed or non-terminal condition clearly
+
+#### Scenario: Extraction is blocked by inconsistent scheduler evidence
+- **WHEN** scheduler records disagree on receipt ID, run ID, job ID, timestamp order, exit status, payload evidence, accounting linkage, or raw-output identity
+- **THEN** downstream extraction does not run
+- **AND** the failed receipt validation identifies each inconsistency
 
 ### Requirement: Mock scheduler async timing is configurable
 The system SHALL support configurable local async timing so operator demos exercise submit/wait/collect while tests can run quickly.
@@ -227,3 +236,45 @@ The system SHALL support configurable local async timing so operator demos exerc
 - **AND** bootstrap compatibility checks, default controlled-source refs, tests, and documentation are updated consistently rather than mutating the existing `controlled-source-demo-v0.1.0` tag contract silently
 - **AND** a new controlled-source demo tag such as `controlled-source-demo-v0.1.1` identifies the updated payload contract
 
+### Requirement: Product inputs are validated before report generation
+The system SHALL validate every extracted CSV consumed by report generation before report products are created.
+
+#### Scenario: Required and ad hoc extracts are valid
+- **WHEN** required and ad hoc CSVs satisfy their configured headers, row/cardinality, logical-group, and field-type constraints
+- **THEN** report generation may consume them
+
+#### Scenario: Extract validation fails
+- **WHEN** either report-input CSV fails configured validation
+- **THEN** report generation does not run
+- **AND** no successful report products are published for that attempt
+
+### Requirement: Derived products are published atomically
+The system SHALL write extracted CSVs and generated reports to temporary files in their destination directories, validate or reopen them as appropriate, and atomically replace final product paths only after successful completion.
+
+#### Scenario: Product generation succeeds
+- **WHEN** an extractor or report generator completes and its output passes the required structural check
+- **THEN** the temporary output atomically replaces the final product path
+
+#### Scenario: Product generation fails
+- **WHEN** an extractor or report generator raises an error or produces an invalid output
+- **THEN** no partial output is published at the final product path
+- **AND** temporary output is removed or left clearly outside the delivered product inventory
+
+### Requirement: Failed support stages leave attempt evidence safely
+The system SHALL record a failed attempt for support and orchestration stages when a validated provenance evidence root can be used without violating fresh-run policy.
+
+#### Scenario: Support operation fails after evidence root is safe
+- **WHEN** a configured support stage starts and then fails after its evidence path has been validated
+- **THEN** stage evidence records start and finish time, failed status, normalized error, and return code while preserving the original command failure
+
+#### Scenario: Preflight must not create an unsafe or reused root
+- **WHEN** admission fails because the run identifier/path is unsafe or a fresh run root already exists
+- **THEN** the workflow reports the failure through the invoking process without creating or overwriting that run's provenance root solely to record an attempt
+
+### Requirement: Controlled payload code is run-local and commit-bound
+The system SHALL execute controlled simulation and extraction code from the run's selected-commit materialization while preserving `sim-run-root/` as the simulation runtime contract.
+
+#### Scenario: Simulation payload executes
+- **WHEN** the mock scheduler launches the controlled payload
+- **THEN** `sim-run-root/procs/run-script.sh` and every delegated controlled executable resolve to admitted per-run materializations
+- **AND** no controlled executable is loaded from the mutable live worktree

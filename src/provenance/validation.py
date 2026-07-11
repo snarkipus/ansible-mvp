@@ -35,6 +35,8 @@ class CSVShapeExpectation:
     minimum_data_rows: int | None = None
     expected_column_count: int | None = None
     expected_header: tuple[str, ...] | None = None
+    expected_column_values: dict[str, tuple[str, ...]] | None = None
+    integer_columns: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -208,6 +210,50 @@ def validate_csv_product(
             )
         )
 
+    header_indexes = {name: index for index, name in enumerate(header or ())}
+    for column_name, expected_values in (expectation.expected_column_values or {}).items():
+        index = header_indexes.get(column_name)
+        actual_values = (
+            sorted({row[index] for row in rows[1:] if index < len(row)})
+            if index is not None
+            else []
+        )
+        expected_list = sorted(expected_values)
+        checks.append(
+            _check(
+                f"column_values:{column_name}",
+                passed=actual_values == expected_list,
+                expected=expected_list,
+                actual=actual_values,
+                message=None
+                if actual_values == expected_list
+                else f"CSV column {column_name!r} values do not match",
+            )
+        )
+
+    for column_name in expectation.integer_columns:
+        index = header_indexes.get(column_name)
+        invalid_values = (
+            [
+                row[index] if index < len(row) else "<missing value>"
+                for row in rows[1:]
+                if index >= len(row) or not _is_integer(row[index])
+            ]
+            if index is not None
+            else ["<missing column>"]
+        )
+        checks.append(
+            _check(
+                f"integer_column:{column_name}",
+                passed=index is not None and not invalid_values,
+                expected="integer values",
+                actual=invalid_values,
+                message=None
+                if index is not None and not invalid_values
+                else f"CSV column {column_name!r} contains non-integer values",
+            )
+        )
+
     return _evidence(
         record_path,
         checks,
@@ -222,6 +268,14 @@ def validate_csv_product(
 def _read_csv_rows(path: Path) -> list[list[str]]:
     with path.open(newline="", encoding="utf-8") as file_obj:
         return list(csv.reader(file_obj))
+
+
+def _is_integer(value: str) -> bool:
+    try:
+        int(value)
+    except ValueError:
+        return False
+    return True
 
 
 def _check(

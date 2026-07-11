@@ -5,7 +5,7 @@
 
 RUN_ID ?= demo_001
 CONTROLLED_SOURCE_REPO ?= ../controlled-source-demo
-CONTROLLED_SOURCE_REF ?= controlled-source-demo-v0.1.1
+CONTROLLED_SOURCE_REF ?= controlled-source-demo-v0.1.2
 RUN_ROOT_POLICY ?= fresh
 PYTHON_PACKAGE := src/provenance
 RUN_ROOT := runs/$(RUN_ID)
@@ -129,6 +129,11 @@ build-reports: ## Generate summary.xlsx, chart.png, and briefing.pptx derived re
 validate: ## Validate extracted products.
 	uv run provenance validate-required \
 		--shape-config configs/expected_shape.required_extract.yaml \
+		--run-id "$(RUN_ID)" \
+		--workspace-root . \
+		--stage-output "$(PROVENANCE_ROOT)/logs/validate.stage.json"
+	uv run provenance validate-required \
+		--shape-config configs/expected_shape.ad_hoc_extract.yaml \
 		--run-id "$(RUN_ID)" \
 		--workspace-root . \
 		--stage-output "$(PROVENANCE_ROOT)/logs/validate.stage.json"

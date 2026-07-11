@@ -114,3 +114,27 @@ def test_validate_csv_product_reports_row_column_and_header_mismatches(tmp_path:
     assert checks["data_row_count"].actual == 2
     assert checks["column_count"].actual == [2, 2, 1]
     assert checks["header"].actual == ["case", "value"]
+
+
+def test_validate_csv_product_checks_column_values_and_integer_fields(tmp_path: Path) -> None:
+    product = tmp_path / "ad_hoc.csv"
+    product.write_text(
+        "logical_group,input_count,total_bytes\ndirA,3,39\ndirB,not-an-int,42\n",
+        encoding="utf-8",
+    )
+
+    evidence = validate_csv_product(
+        product,
+        CSVShapeExpectation(
+            expected_data_rows=3,
+            expected_column_values={"logical_group": ("dirA", "dirB", "dirC")},
+            integer_columns=("input_count", "total_bytes"),
+        ),
+    )
+
+    checks = {check.name: check for check in evidence.checks}
+    assert evidence.status is ValidationStatus.FAIL
+    assert checks["data_row_count"].actual == 2
+    assert checks["column_values:logical_group"].actual == ["dirA", "dirB"]
+    assert checks["integer_column:input_count"].actual == ["not-an-int"]
+    assert checks["integer_column:total_bytes"].passed is True

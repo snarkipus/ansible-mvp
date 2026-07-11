@@ -1,15 +1,19 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import stat
 import subprocess
 from pathlib import Path
 
+import pytest
 import yaml
 
 from provenance.cli import main
 from provenance.scheduler import (
     collect_mock_lsf_accounting,
     submit_mock_lsf_job,
+    validate_scheduler_receipt,
     wait_mock_lsf_job,
     write_mock_lsf_metadata,
 )
@@ -40,6 +44,7 @@ def _write_config(path: Path) -> None:
                         "products/extracted",
                         "products/reports",
                     ],
+                    "canonical_raw_output": "lists/dirC/sim-out.dat",
                 },
                 "materialization": {
                     "inputs": {
@@ -49,7 +54,12 @@ def _write_config(path: Path) -> None:
                         "files": ["ex1.dat", "ex2.dat", "ex3.dat"],
                         "mode": "copy_from_controlled_source",
                     },
-                    "runtime_scripts": ["run_script"],
+                    "runtime_scripts": [
+                        "run_script",
+                        "synthetic_sim_engine",
+                        "extract_required",
+                        "ad_hoc_extract",
+                    ],
                 },
                 "controlled_scripts": {
                     "run_script": {
@@ -57,7 +67,42 @@ def _write_config(path: Path) -> None:
                         "materialized_path": "sim-run-root/procs/run-script.sh",
                         "materialization_mode": "copy_from_controlled_source",
                     },
+                    "synthetic_sim_engine": {
+                        "relative_path": "scripts/synthetic_sim_engine.sh",
+                        "materialized_path": (
+                            "provenance/controlled-source/scripts/synthetic_sim_engine.sh"
+                        ),
+                        "materialization_mode": "copy_from_controlled_source",
+                    },
+                    "extract_required": {
+                        "relative_path": "scripts/extract_required.pl",
+                        "materialized_path": (
+                            "provenance/controlled-source/scripts/extract_required.pl"
+                        ),
+                        "materialization_mode": "copy_from_controlled_source",
+                    },
+                    "ad_hoc_extract": {
+                        "relative_path": "scripts/ad_hoc_extract.py",
+                        "materialized_path": (
+                            "provenance/controlled-source/scripts/ad_hoc_extract.py"
+                        ),
+                        "materialization_mode": "copy_from_controlled_source",
+                    },
                 },
+                "approved_command_paths": {
+                    "wrapper": ["Makefile"],
+                    "controlled_source": [
+                        "procs/run-script.sh",
+                        "scripts/synthetic_sim_engine.sh",
+                        "scripts/extract_required.pl",
+                        "scripts/ad_hoc_extract.py",
+                    ],
+                },
+                "approved_make_targets": [
+                    "submit-mock-lsf",
+                    "wait-mock-lsf",
+                    "collect-mock-lsf",
+                ],
                 "scheduler": {
                     "mode": "mock_lsf",
                     "emulator_execution_mode": "local_async",
@@ -80,6 +125,7 @@ def _write_config(path: Path) -> None:
                         "collect-mock-lsf",
                     ],
                 },
+                "stage_defaults": {"log_directory": "provenance/logs"},
                 "stages": [
                     {
                         "name": "run_simulation",
@@ -89,7 +135,12 @@ def _write_config(path: Path) -> None:
                         "operator_visible": True,
                         "command": "procs/run-script.sh",
                         "command_kind": "materialized_controlled_script",
+                        "approved_command_path": "procs/run-script.sh",
                         "working_directory": "sim-run-root",
+                        "expected_controlled_scripts": [
+                            "run_script",
+                            "synthetic_sim_engine",
+                        ],
                         "inputs": ["sim-run-root/input"],
                         "outputs": ["sim-run-root/lists/dirC/sim-out.dat"],
                     },
@@ -105,6 +156,8 @@ def _write_config(path: Path) -> None:
                         ),
                         "working_directory": "controlled_source_repo",
                         "command_kind": "controlled_source_script",
+                        "approved_command_path": "scripts/extract_required.pl",
+                        "expected_controlled_scripts": ["extract_required"],
                         "inputs": ["sim-run-root/lists/dirC/sim-out.dat"],
                         "outputs": ["provenance/products/extracted/required.csv"],
                     },
@@ -120,10 +173,20 @@ def _write_config(path: Path) -> None:
                         ),
                         "working_directory": "controlled_source_repo",
                         "command_kind": "controlled_source_script",
+                        "approved_command_path": "scripts/ad_hoc_extract.py",
+                        "expected_controlled_scripts": ["ad_hoc_extract"],
                         "inputs": ["sim-run-root/lists/dirC/sim-out.dat"],
                         "outputs": ["provenance/products/extracted/ad_hoc.csv"],
                     },
                 ],
+                "validations": {
+                    "required_extract": {
+                        "config_path": "configs/expected_shape.required_extract.yaml",
+                        "product_path": "provenance/products/extracted/required.csv",
+                        "evidence_path": "provenance/validations/required_extract.json",
+                    }
+                },
+                "manifest": {"output_path": "provenance/manifest.yaml"},
             }
         ),
         encoding="utf-8",
@@ -166,8 +229,86 @@ def _write_scheduler_state(path: Path, run_id: str, state: str) -> None:
     )
 
 
+def _write_successful_scheduler_receipt(path: Path, run_id: str) -> None:
+    run_root = path / "runs" / run_id
+    scheduler_root = run_root / "provenance" / "scheduler"
+    logs_root = run_root / "provenance" / "logs"
+    scheduler_root.mkdir(parents=True, exist_ok=True)
+    logs_root.mkdir(parents=True, exist_ok=True)
+    receipt_id = f"receipt-{run_id}"
+    job_id = f"mock-{run_id}"
+    submitted_at = "2026-01-01T00:00:00Z"
+    started_at = "2026-01-01T00:00:01Z"
+    finished_at = "2026-01-01T00:00:02Z"
+    accounted_at = "2026-01-01T00:00:03Z"
+    payload_path = f"runs/{run_id}/provenance/logs/run_simulation.stage.json"
+    raw_output = run_root / "sim-run-root" / "lists" / "dirC" / "sim-out.dat"
+    raw_hash = hashlib.sha256(raw_output.read_bytes()).hexdigest()
+    state = {
+        "receipt_id": receipt_id,
+        "run_id": run_id,
+        "scheduler": "mock_lsf",
+        "job_id": job_id,
+        "state": "DONE",
+        "exit_code": 0,
+        "submitted_at": submitted_at,
+        "started_at": started_at,
+        "finished_at": finished_at,
+        "payload_stage_evidence": payload_path,
+    }
+    (scheduler_root / "submission.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "receipt_id": receipt_id,
+                "run_id": run_id,
+                "job_id": job_id,
+                "scheduler": "mock_lsf",
+            }
+        ),
+        encoding="utf-8",
+    )
+    for filename in ("job-state.json", "terminal-state.json"):
+        (scheduler_root / filename).write_text(json.dumps(state), encoding="utf-8")
+    (scheduler_root / "accounting.yaml").write_text(
+        yaml.safe_dump(
+            {
+                **state,
+                "accounted_at": accounted_at,
+                "payload_stage_evidence": payload_path,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (logs_root / "run_simulation.stage.json").write_text(
+        json.dumps(
+            {
+                "receipt_id": receipt_id,
+                "run_id": run_id,
+                "job_id": job_id,
+                "name": "run_simulation",
+                "status": "pass",
+                "return_code": 0,
+                "started_at": started_at,
+                "finished_at": finished_at,
+                "outputs": [
+                    {
+                        "relative_path": "sim-run-root/lists/dirC/sim-out.dat",
+                        "sha256": raw_hash,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
 def _prepare_scheduler_payload(
-    *, config_path: Path, run_id: str, workspace_root: Path, controlled_repo: Path
+    *,
+    config_path: Path,
+    run_id: str,
+    workspace_root: Path,
+    controlled_repo: Path,
+    controlled_source_ref: str = "controlled-source-demo-v0.1.2",
 ) -> None:
     prepare_workspace(config_path=config_path, run_id=run_id, workspace_root=workspace_root)
     materialize_inputs(
@@ -175,14 +316,14 @@ def _prepare_scheduler_payload(
         run_id=run_id,
         workspace_root=workspace_root,
         controlled_source_repo=controlled_repo,
-        controlled_source_ref="controlled-source-demo-v0.1.1",
+        controlled_source_ref=controlled_source_ref,
     )
     materialize_runtime_scripts(
         config_path=config_path,
         run_id=run_id,
         workspace_root=workspace_root,
         controlled_source_repo=controlled_repo,
-        controlled_source_ref="controlled-source-demo-v0.1.1",
+        controlled_source_ref=controlled_source_ref,
     )
 
 
@@ -214,6 +355,32 @@ def test_prepare_workspace_creates_separated_simulation_and_provenance_dirs(
 
     assert not (sim_root / "provenance").exists()
     assert result.to_dict()["provenance_root"] == "runs/demo_001/provenance"
+
+
+def test_prepare_workspace_rejects_invalid_config_before_creating_run_root(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "run.synthetic.yaml"
+    _write_config(config_path)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["stages"][0]["outputs"] = ["../../outside"]
+    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+
+    with pytest.raises(SystemExit) as error:
+        main(
+            [
+                "prepare-workspace",
+                "--config",
+                str(config_path),
+                "--run-id",
+                "unsafe_config",
+                "--workspace-root",
+                str(tmp_path),
+            ]
+        )
+
+    assert error.value.code == 2
+    assert not (tmp_path / "runs" / "unsafe_config").exists()
 
 
 def test_stage_command_argv_resolves_only_controlled_source_script_executables(
@@ -294,7 +461,7 @@ def test_materialize_inputs_copies_repeated_groups_and_records_hashes(tmp_path: 
         run_id="demo_003",
         workspace_root=tmp_path,
         controlled_source_repo=controlled_repo,
-        controlled_source_ref="controlled-source-demo-v0.1.1",
+        controlled_source_ref="controlled-source-demo-v0.1.2",
     )
 
     assert len(result.artifacts) == 9
@@ -311,6 +478,54 @@ def test_materialize_inputs_copies_repeated_groups_and_records_hashes(tmp_path: 
     assert dir_c_ex3.sha256 is not None and len(dir_c_ex3.sha256) == 64
     assert dir_c_ex3.sim_area == "input"
     assert dir_c_ex3.logical_group == "dirC"
+
+
+def test_materialization_uses_selected_ref_when_clean_head_differs(tmp_path: Path) -> None:
+    config_path = tmp_path / "run.synthetic.yaml"
+    controlled_repo = _create_controlled_source_repo(tmp_path / "controlled-source-demo")
+    selected_input = (controlled_repo / "fixtures/controlled_inputs/dirA/ex1.dat").read_bytes()
+    selected_engine = (controlled_repo / "scripts/synthetic_sim_engine.sh").read_bytes()
+    (controlled_repo / "fixtures/controlled_inputs/dirA/ex1.dat").write_text(
+        "new head input\n", encoding="utf-8"
+    )
+    (controlled_repo / "scripts/synthetic_sim_engine.sh").write_text(
+        "#!/usr/bin/env bash\nexit 9\n", encoding="utf-8"
+    )
+    _git(controlled_repo, "add", "fixtures", "scripts/synthetic_sim_engine.sh")
+    _git(
+        controlled_repo,
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.invalid",
+        "commit",
+        "-m",
+        "new clean head",
+    )
+    _write_config(config_path)
+    prepare_workspace(config_path=config_path, run_id="selected_ref", workspace_root=tmp_path)
+
+    materialize_inputs(
+        config_path=config_path,
+        run_id="selected_ref",
+        workspace_root=tmp_path,
+        controlled_source_repo=controlled_repo,
+        controlled_source_ref="controlled-source-demo-v0.1.2",
+    )
+    materialize_runtime_scripts(
+        config_path=config_path,
+        run_id="selected_ref",
+        workspace_root=tmp_path,
+        controlled_source_repo=controlled_repo,
+        controlled_source_ref="controlled-source-demo-v0.1.2",
+    )
+
+    assert (
+        tmp_path / "runs/selected_ref/sim-run-root/input/dirA/ex1.dat"
+    ).read_bytes() == selected_input
+    assert (
+        tmp_path / "runs/selected_ref/provenance/controlled-source/scripts/synthetic_sim_engine.sh"
+    ).read_bytes() == selected_engine
 
 
 def test_cli_materialize_procs_copies_runtime_script_and_writes_evidence(tmp_path: Path) -> None:
@@ -335,7 +550,7 @@ def test_cli_materialize_procs_copies_runtime_script_and_writes_evidence(tmp_pat
                 "--controlled-source-repo",
                 str(controlled_repo),
                 "--controlled-source-ref",
-                "controlled-source-demo-v0.1.1",
+                "controlled-source-demo-v0.1.2",
                 "--output",
                 str(output_path),
             ]
@@ -347,6 +562,13 @@ def test_cli_materialize_procs_copies_runtime_script_and_writes_evidence(tmp_pat
     assert script.is_file()
     assert script.stat().st_mode & 0o111
     evidence = json.loads(output_path.read_text(encoding="utf-8"))
+    assert len(evidence["artifacts"]) == 4
+    assert {item["role"] for item in evidence["artifacts"]} == {
+        "runtime_script",
+        "controlled_code",
+    }
+    assert all(item["source_blob_oid"] for item in evidence["artifacts"])
+    assert all(len(item["source_sha256"]) == 64 for item in evidence["artifacts"])
     artifact = evidence["artifacts"][0]
     assert artifact["source_path"] == "procs/run-script.sh"
     assert artifact["destination_path"] == "runs/demo_004/sim-run-root/procs/run-script.sh"
@@ -354,6 +576,71 @@ def test_cli_materialize_procs_copies_runtime_script_and_writes_evidence(tmp_pat
     assert artifact["hash_status"] == "hashed"
     assert len(artifact["sha256"]) == 64
     assert artifact["role"] == "runtime_script"
+    assert artifact["source_file_mode"] == "100755"
+    assert artifact["destination_file_mode"] == "0555"
+    assert stat.S_IMODE(script.stat().st_mode) == 0o555
+
+    assert (
+        main(
+            [
+                "inventory-pre",
+                "--run-id",
+                "demo_004",
+                "--workspace-root",
+                str(tmp_path),
+            ]
+        )
+        == 0
+    )
+    controlled_inventory = json.loads(
+        (
+            tmp_path / "runs/demo_004/provenance/inventories/pre_run_controlled_scripts.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert len(controlled_inventory) == 4
+    assert sum(item["role"] == "controlled_code" for item in controlled_inventory) == 3
+
+
+@pytest.mark.parametrize(
+    "relative_path",
+    [
+        "sim-run-root/input/dirA/ex1.dat",
+        "sim-run-root/procs/run-script.sh",
+    ],
+)
+def test_scheduler_rejects_tampered_materialized_closure(
+    tmp_path: Path, relative_path: str
+) -> None:
+    config_path = tmp_path / "run.synthetic.yaml"
+    controlled_repo = _create_controlled_source_repo(tmp_path / "controlled-source-demo")
+    _write_config(config_path)
+    _prepare_scheduler_payload(
+        config_path=config_path,
+        run_id="tampered_payload",
+        workspace_root=tmp_path,
+        controlled_repo=controlled_repo,
+    )
+    target = tmp_path / "runs/tampered_payload" / relative_path
+    target.chmod(0o755 if target.stat().st_mode & 0o111 else 0o644)
+    target.write_text("tampered\n", encoding="utf-8")
+
+    submit_mock_lsf_job(
+        config_path=config_path,
+        run_id="tampered_payload",
+        workspace_root=tmp_path,
+        controlled_source_repo=controlled_repo,
+    )
+    terminal = wait_mock_lsf_job(
+        config_path=config_path,
+        run_id="tampered_payload",
+        workspace_root=tmp_path,
+    )
+
+    assert terminal["state"] == "EXIT"
+    stderr = (tmp_path / "runs/tampered_payload/provenance/scheduler/stderr.log").read_text(
+        encoding="utf-8"
+    )
+    assert "materialized artifact integrity mismatch" in stderr
 
 
 def test_write_mock_lsf_metadata_records_absent_lsf_tools_without_failing(
@@ -368,14 +655,14 @@ def test_write_mock_lsf_metadata_records_absent_lsf_tools_without_failing(
         run_id="demo_005",
         workspace_root=tmp_path,
         controlled_source_repo=controlled_repo,
-        controlled_source_ref="controlled-source-demo-v0.1.1",
+        controlled_source_ref="controlled-source-demo-v0.1.2",
     )
     materialize_runtime_scripts(
         config_path=config_path,
         run_id="demo_005",
         workspace_root=tmp_path,
         controlled_source_repo=controlled_repo,
-        controlled_source_ref="controlled-source-demo-v0.1.1",
+        controlled_source_ref="controlled-source-demo-v0.1.2",
     )
 
     payload = write_mock_lsf_metadata(
@@ -408,14 +695,14 @@ def test_cli_submit_mock_lsf_writes_scheduler_yaml(tmp_path: Path) -> None:
         run_id="demo_006",
         workspace_root=tmp_path,
         controlled_source_repo=controlled_repo,
-        controlled_source_ref="controlled-source-demo-v0.1.1",
+        controlled_source_ref="controlled-source-demo-v0.1.2",
     )
     materialize_runtime_scripts(
         config_path=config_path,
         run_id="demo_006",
         workspace_root=tmp_path,
         controlled_source_repo=controlled_repo,
-        controlled_source_ref="controlled-source-demo-v0.1.1",
+        controlled_source_ref="controlled-source-demo-v0.1.2",
     )
 
     assert (
@@ -483,11 +770,86 @@ def test_mock_lsf_submit_wait_and_collect_use_wrapper_terminal_state(tmp_path: P
     accounting = collect_mock_lsf_accounting(
         config_path=config_path, run_id="demo_006a", workspace_root=tmp_path
     )
+    receipt = validate_scheduler_receipt(
+        config_path=config_path, run_id="demo_006a", workspace_root=tmp_path
+    )
     assert accounting["state"] == "DONE"
     assert accounting["exit_code"] == 0
     assert accounting["payload_stage_evidence"] == (
         "runs/demo_006a/provenance/logs/run_simulation.stage.json"
     )
+    assert receipt["status"] == "pass"
+    assert receipt["receipt_id"]
+    assert receipt["errors"] == []
+
+
+@pytest.mark.parametrize(
+    ("case", "expected_error"),
+    [
+        ("receipt_identity", "terminal_state receipt_id"),
+        ("run_job_identity", "terminal_state run_id"),
+        ("missing_component", "accounting: YAML evidence does not exist"),
+        ("timestamp_order", "timestamps are not monotonic"),
+        ("nonzero_done", "terminal state must be DONE with zero exit_code"),
+        ("failed_payload", "payload stage evidence must pass"),
+        ("accounting_link", "accounting payload-stage linkage is inconsistent"),
+        ("raw_hash", "raw output hash does not match"),
+    ],
+)
+def test_scheduler_receipt_rejects_inconsistent_components(
+    tmp_path: Path, case: str, expected_error: str
+) -> None:
+    config_path = tmp_path / "run.synthetic.yaml"
+    _write_config(config_path)
+    prepare_workspace(config_path=config_path, run_id="receipt_bad", workspace_root=tmp_path)
+    raw_output = tmp_path / "runs/receipt_bad/sim-run-root/lists/dirC/sim-out.dat"
+    raw_output.parent.mkdir(parents=True)
+    raw_output.write_text(
+        "logical_group,example,bytes,sha256_prefix\ndirC,ex1.dat,13,7fee469deaea\n",
+        encoding="utf-8",
+    )
+    _write_successful_scheduler_receipt(tmp_path, "receipt_bad")
+    scheduler_root = tmp_path / "runs/receipt_bad/provenance/scheduler"
+    logs_root = tmp_path / "runs/receipt_bad/provenance/logs"
+
+    if case in {"receipt_identity", "run_job_identity", "nonzero_done"}:
+        terminal_path = scheduler_root / "terminal-state.json"
+        terminal = json.loads(terminal_path.read_text(encoding="utf-8"))
+        if case == "receipt_identity":
+            terminal["receipt_id"] = "stale-receipt"
+        elif case == "run_job_identity":
+            terminal["run_id"] = "other-run"
+            terminal["job_id"] = "other-job"
+        else:
+            terminal["exit_code"] = 9
+        terminal_path.write_text(json.dumps(terminal), encoding="utf-8")
+    elif case == "missing_component":
+        (scheduler_root / "accounting.yaml").unlink()
+    elif case in {"timestamp_order", "accounting_link"}:
+        accounting_path = scheduler_root / "accounting.yaml"
+        accounting = yaml.safe_load(accounting_path.read_text(encoding="utf-8"))
+        if case == "timestamp_order":
+            accounting["accounted_at"] = "2025-12-31T23:59:59Z"
+        else:
+            accounting["payload_stage_evidence"] = "stale-payload.json"
+        accounting_path.write_text(yaml.safe_dump(accounting), encoding="utf-8")
+    elif case == "failed_payload":
+        payload_path = logs_root / "run_simulation.stage.json"
+        payload = json.loads(payload_path.read_text(encoding="utf-8"))
+        payload["status"] = "fail"
+        payload["return_code"] = 1
+        payload_path.write_text(json.dumps(payload), encoding="utf-8")
+    else:
+        raw_output.write_text("changed after payload\n", encoding="utf-8")
+
+    receipt = validate_scheduler_receipt(
+        config_path=config_path,
+        run_id="receipt_bad",
+        workspace_root=tmp_path,
+    )
+
+    assert receipt["status"] == "fail"
+    assert expected_error in "; ".join(receipt["errors"])
 
 
 def test_mock_lsf_wait_timeout_records_failed_evidence(tmp_path: Path) -> None:
@@ -552,15 +914,27 @@ def test_mock_lsf_payload_nonzero_exit_is_recorded_by_wrapper(
     controlled_repo = _create_controlled_source_repo(tmp_path / "controlled-source-demo")
     _write_config(config_path)
     _set_runtime_delay(config_path, minimum=0.0, maximum=0.0, timeout=2.0)
+    controlled_script = controlled_repo / "procs/run-script.sh"
+    controlled_script.write_text("#!/usr/bin/env bash\nexit 7\n", encoding="utf-8")
+    controlled_script.chmod(0o755)
+    _git(controlled_repo, "add", "procs/run-script.sh")
+    _git(
+        controlled_repo,
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.invalid",
+        "commit",
+        "-m",
+        "failing payload",
+    )
     _prepare_scheduler_payload(
         config_path=config_path,
         run_id="demo_006d",
         workspace_root=tmp_path,
         controlled_repo=controlled_repo,
+        controlled_source_ref="HEAD",
     )
-    materialized_script = tmp_path / "runs/demo_006d/sim-run-root/procs/run-script.sh"
-    materialized_script.write_text("#!/usr/bin/env bash\nexit 7\n", encoding="utf-8")
-    materialized_script.chmod(0o755)
 
     submit_mock_lsf_job(
         config_path=config_path,
@@ -659,7 +1033,7 @@ def test_run_synthetic_simulation_writes_raw_output_and_stage_evidence(
         run_id="demo_007",
         workspace_root=tmp_path,
         controlled_source_repo=controlled_repo,
-        controlled_source_ref="controlled-source-demo-v0.1.1",
+        controlled_source_ref="controlled-source-demo-v0.1.2",
     )
     assert (
         main(
@@ -674,7 +1048,7 @@ def test_run_synthetic_simulation_writes_raw_output_and_stage_evidence(
                 "--controlled-source-repo",
                 str(controlled_repo),
                 "--controlled-source-ref",
-                "controlled-source-demo-v0.1.1",
+                "controlled-source-demo-v0.1.2",
             ]
         )
         == 0
@@ -720,7 +1094,7 @@ def test_required_extraction_writes_derived_csv_outside_sim_run_root_and_stage_e
         run_id="demo_008",
         workspace_root=tmp_path,
         controlled_source_repo=controlled_repo,
-        controlled_source_ref="controlled-source-demo-v0.1.1",
+        controlled_source_ref="controlled-source-demo-v0.1.2",
     )
     main(
         [
@@ -734,7 +1108,7 @@ def test_required_extraction_writes_derived_csv_outside_sim_run_root_and_stage_e
             "--controlled-source-repo",
             str(controlled_repo),
             "--controlled-source-ref",
-            "controlled-source-demo-v0.1.1",
+            "controlled-source-demo-v0.1.2",
         ]
     )
     run_synthetic_simulation(
@@ -743,7 +1117,7 @@ def test_required_extraction_writes_derived_csv_outside_sim_run_root_and_stage_e
         workspace_root=tmp_path,
         controlled_source_repo=controlled_repo,
     )
-    _write_scheduler_state(tmp_path, "demo_008", "DONE")
+    _write_successful_scheduler_receipt(tmp_path, "demo_008")
 
     result = run_required_extraction(
         config_path=config_path,
@@ -763,7 +1137,7 @@ def test_required_extraction_writes_derived_csv_outside_sim_run_root_and_stage_e
     ]
     assert result.status == "pass"
     assert result.return_code == 0
-    assert result.working_directory == "controlled-source-demo"
+    assert result.working_directory == "runs/demo_008/provenance/controlled-source"
     assert result.stdout_log == "runs/demo_008/provenance/logs/extract_required.stdout.log"
     assert result.to_dict()["return_code"] == 0
     assert result.to_dict()["logs"] == {
@@ -785,6 +1159,13 @@ def test_cli_extract_required_writes_stage_json(tmp_path: Path) -> None:
     output_path = tmp_path / "runs/demo_009/provenance/logs/extract_required.stage.json"
     _write_config(config_path)
     prepare_workspace(config_path=config_path, run_id="demo_009", workspace_root=tmp_path)
+    materialize_runtime_scripts(
+        config_path=config_path,
+        run_id="demo_009",
+        workspace_root=tmp_path,
+        controlled_source_repo=controlled_repo,
+        controlled_source_ref="controlled-source-demo-v0.1.2",
+    )
     raw_output = tmp_path / "runs/demo_009/sim-run-root/lists/dirC/sim-out.dat"
     raw_output.parent.mkdir(parents=True)
     raw_output.write_text(
@@ -793,7 +1174,7 @@ def test_cli_extract_required_writes_stage_json(tmp_path: Path) -> None:
         "dirC,ex1.dat,13,7fee469deaea\n",
         encoding="utf-8",
     )
-    _write_scheduler_state(tmp_path, "demo_009", "DONE")
+    _write_successful_scheduler_receipt(tmp_path, "demo_009")
 
     assert (
         main(
@@ -847,8 +1228,8 @@ def test_required_extraction_requires_terminal_scheduler_done_not_raw_output_onl
             controlled_source_repo=controlled_repo,
         )
     except ValueError as error:
-        assert "requires terminal scheduler DONE" in str(error)
-        assert "scheduler state evidence is missing" in str(error)
+        assert "requires a passed scheduler receipt" in str(error)
+        assert "submission" in str(error)
     else:  # pragma: no cover - assertion guard
         raise AssertionError("extraction should require terminal scheduler DONE")
 
@@ -874,10 +1255,44 @@ def test_required_extraction_rejects_failed_scheduler_terminal_state(tmp_path: P
             controlled_source_repo=controlled_repo,
         )
     except ValueError as error:
-        assert "requires terminal scheduler DONE" in str(error)
-        assert "'EXIT'" in str(error)
+        assert "requires a passed scheduler receipt" in str(error)
+        assert "terminal_state" in str(error)
     else:  # pragma: no cover - assertion guard
         raise AssertionError("extraction should reject non-DONE scheduler terminal state")
+
+
+def test_extraction_rejects_tampered_run_local_extractor(tmp_path: Path) -> None:
+    config_path = tmp_path / "run.synthetic.yaml"
+    controlled_repo = _create_controlled_source_repo(tmp_path / "controlled-source-demo")
+    _write_config(config_path)
+    prepare_workspace(config_path=config_path, run_id="tampered_extract", workspace_root=tmp_path)
+    materialize_runtime_scripts(
+        config_path=config_path,
+        run_id="tampered_extract",
+        workspace_root=tmp_path,
+        controlled_source_repo=controlled_repo,
+        controlled_source_ref="controlled-source-demo-v0.1.2",
+    )
+    raw_output = tmp_path / "runs/tampered_extract/sim-run-root/lists/dirC/sim-out.dat"
+    raw_output.parent.mkdir(parents=True)
+    raw_output.write_text(
+        "logical_group,example,bytes,sha256_prefix\ndirC,ex1.dat,13,7fee469deaea\n",
+        encoding="utf-8",
+    )
+    _write_successful_scheduler_receipt(tmp_path, "tampered_extract")
+    extractor = (
+        tmp_path / "runs/tampered_extract/provenance/controlled-source/scripts/extract_required.pl"
+    )
+    extractor.chmod(0o755)
+    extractor.write_text("#!/usr/bin/env perl\nexit 0;\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="materialized artifact integrity mismatch"):
+        run_required_extraction(
+            config_path=config_path,
+            run_id="tampered_extract",
+            workspace_root=tmp_path,
+            controlled_source_repo=controlled_repo,
+        )
 
 
 def test_ad_hoc_extraction_writes_derived_csv_outside_sim_run_root_and_stage_evidence(
@@ -887,6 +1302,13 @@ def test_ad_hoc_extraction_writes_derived_csv_outside_sim_run_root_and_stage_evi
     controlled_repo = _create_controlled_source_repo(tmp_path / "controlled-source-demo")
     _write_config(config_path)
     prepare_workspace(config_path=config_path, run_id="demo_010", workspace_root=tmp_path)
+    materialize_runtime_scripts(
+        config_path=config_path,
+        run_id="demo_010",
+        workspace_root=tmp_path,
+        controlled_source_repo=controlled_repo,
+        controlled_source_ref="controlled-source-demo-v0.1.2",
+    )
     raw_output = tmp_path / "runs/demo_010/sim-run-root/lists/dirC/sim-out.dat"
     raw_output.parent.mkdir(parents=True)
     raw_output.write_text(
@@ -896,7 +1318,7 @@ def test_ad_hoc_extraction_writes_derived_csv_outside_sim_run_root_and_stage_evi
         "dirC,ex2.dat,17,ignoredbbbbb\n",
         encoding="utf-8",
     )
-    _write_scheduler_state(tmp_path, "demo_010", "DONE")
+    _write_successful_scheduler_receipt(tmp_path, "demo_010")
 
     result = run_ad_hoc_extraction(
         config_path=config_path,
@@ -915,7 +1337,7 @@ def test_ad_hoc_extraction_writes_derived_csv_outside_sim_run_root_and_stage_evi
     ]
     assert result.status == "pass"
     assert result.return_code == 0
-    assert result.working_directory == "controlled-source-demo"
+    assert result.working_directory == "runs/demo_010/provenance/controlled-source"
     assert result.stdout_log == "runs/demo_010/provenance/logs/extract_ad_hoc.stdout.log"
     assert result.inputs[0].relative_path == "sim-run-root/lists/dirC/sim-out.dat"
     assert result.inputs[0].role == "raw_output"
@@ -932,6 +1354,13 @@ def test_cli_extract_ad_hoc_writes_stage_json(tmp_path: Path) -> None:
     output_path = tmp_path / "runs/demo_011/provenance/logs/extract_ad_hoc.stage.json"
     _write_config(config_path)
     prepare_workspace(config_path=config_path, run_id="demo_011", workspace_root=tmp_path)
+    materialize_runtime_scripts(
+        config_path=config_path,
+        run_id="demo_011",
+        workspace_root=tmp_path,
+        controlled_source_repo=controlled_repo,
+        controlled_source_ref="controlled-source-demo-v0.1.2",
+    )
     raw_output = tmp_path / "runs/demo_011/sim-run-root/lists/dirC/sim-out.dat"
     raw_output.parent.mkdir(parents=True)
     raw_output.write_text(
@@ -940,7 +1369,7 @@ def test_cli_extract_ad_hoc_writes_stage_json(tmp_path: Path) -> None:
         "dirC,ex1.dat,23,ignoredbbbbb\n",
         encoding="utf-8",
     )
-    _write_scheduler_state(tmp_path, "demo_011", "DONE")
+    _write_successful_scheduler_receipt(tmp_path, "demo_011")
 
     assert (
         main(
@@ -1081,7 +1510,7 @@ def _create_controlled_source_repo(path: Path) -> Path:
         "-m",
         "init",
     )
-    _git(path, "tag", "controlled-source-demo-v0.1.1")
+    _git(path, "tag", "controlled-source-demo-v0.1.2")
     return path
 
 

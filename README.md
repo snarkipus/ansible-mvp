@@ -14,13 +14,14 @@ The single run story:
 
 ```text
 An operator selects a controlled source ref.
-The wrapper verifies source state and prepares a fresh run.
-Controlled inputs and scripts are materialized into sim-run-root.
+The wrapper resolves and inventories selected-commit source, then prepares a fresh run.
+Selected-commit inputs and scripts are materialized into read-only run-local paths.
 The mock scheduler submits the simulation payload asynchronously.
 The workflow waits for terminal scheduler DONE before extracting.
-Products are generated and validated.
+Extracted products are validated before reports are generated.
 The manifest ties source, scheduler evidence, raw outputs, products,
-validations, and stage evidence together.
+validations, and pre-assembly stage evidence together; sibling receipts bind
+assembly and smoke validation to its unchanged final hash.
 ```
 
 That is the MVP. Everything else is scaffolding.
@@ -47,6 +48,9 @@ Two design commitments follow from that:
 - **Scheduler truth gates products.** Extraction runs only after the mock
   scheduler records terminal `DONE`. Failed or timed-out jobs leave
   inspectable evidence instead of plausible-looking products.
+- **Selected commits bind consumed bytes.** Preflight inventories Git blob,
+  mode, and SHA-256 identities from the resolved commit; execution uses
+  verified run-local copies rather than re-reading a mutable source worktree.
 
 ## Quickstart
 
@@ -68,12 +72,16 @@ ansible-playbook ansible/playbooks/run_synthetic_workflow.yml \
   -i ansible/inventory/localhost.ini \
   -e run_id=demo_001 \
   -e controlled_source_repo=../controlled-source-demo \
-  -e controlled_source_ref=controlled-source-demo-v0.1.1
+  -e controlled_source_ref=controlled-source-demo-v0.1.2
 ```
 
 Use a fresh `run_id` for each full run; preflight refuses an existing
 `runs/{run_id}`. For code changes, `make check` is the quality gate
 (format, lint, types, tests).
+
+Run IDs must match `[A-Za-z0-9][A-Za-z0-9._-]*`. Configured and derived paths
+must be relative, contain no `..`, and remain inside their designated workspace
+root.
 
 ## What a successful run produces
 
@@ -83,10 +91,10 @@ runs/demo_001/
 │   ├── input/  lists/  files/        # inputs and raw outputs
 │   └── procs/run-script.sh           # materialized controlled script
 └── provenance/                        # wrapper-owned evidence sidecar
-    ├── manifest.yaml                  # the run provenance spine
+    ├── manifest.yaml                  # immutable run provenance spine
     ├── preflight.json
     ├── scheduler/                     # submission, job/terminal state, accounting
-    ├── logs/                          # per-stage evidence and streams
+    ├── logs/                          # stage evidence; manifest receipt holds final hash
     ├── inventories/
     ├── validations/
     └── products/
@@ -105,8 +113,12 @@ less runs/demo_001/provenance/manifest.yaml
 ```
 
 Start with `workflow.operator_flow` (the short stage story), then
-`repositories` (controlled source state and script hashes), `scheduler`
-(job id, terminal state, exit code), `derived_products`, and `validations`.
+`repositories` (selected commits and artifact identities), `scheduler`
+(coherent receipt status, job id, terminal state, exit code),
+`derived_products`, and `validations`. Finally compare
+`logs/manifest.stage.json` and `validations/manifest_smoke.json`: both identify
+the SHA-256 of the unchanged `manifest.yaml`; neither receipt is embedded in
+the file it finalizes.
 
 The best way to understand what the manifest buys you is the artifact trace:
 [`docs/trace_required_csv.md`](docs/trace_required_csv.md) follows one CSV
@@ -133,9 +145,12 @@ Stated plainly so MVP scope does not silently become a production contract:
 - No real LSF integration; the mock boundary is the replacement seam.
 - No resume/retry semantics: failed runs stay inspectable, then you start a
   fresh `run_id`.
-- No production artifact archive, cataloging, or promotion workflow.
+- No signing, trusted timestamps, tamper-evident preservation, immutable
+  archive, cataloging, or promotion workflow. Evidence is selected-commit-bound
+  and locally hashed, but remains mutable local evidence.
 - No large-output hashing policy beyond SHA-256 at MVP scale.
-- No formal manifest schema; validation is smoke/structural.
+- No formal manifest schema; smoke validation enforces structure and current
+  cross-record semantics in code.
 - No CI/git-hook trigger; runs are sparse and human-gated by design.
 - No multi-job scheduling, job arrays, or daemonized scheduling.
 - Evidence may contain absolute local paths; it is host-bound evidence, not a

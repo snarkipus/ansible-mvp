@@ -3,17 +3,21 @@
 from __future__ import annotations
 
 import csv
+import json
+import os
 import struct
+import tempfile
 import zlib
 from importlib import import_module
 from pathlib import Path
 from typing import Any
 
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 from openpyxl.worksheet.worksheet import Worksheet
 
 from provenance.hashing import hash_artifact
 from provenance.inventory import InventoryRecord, inventory_files, with_sha256
+from provenance.paths import validate_run_id
 
 REPORT_FILENAMES = ("summary.xlsx", "chart.png", "briefing.pptx")
 RgbColor = tuple[int, int, int]
@@ -33,8 +37,7 @@ def build_report_products(
     derived-product inventory records.
     """
 
-    if not run_id:
-        raise ValueError("run_id must be non-empty")
+    validate_run_id(run_id)
 
     root = Path(workspace_root).expanduser().resolve()
     provenance_root = root / "runs" / run_id / "provenance"
@@ -44,12 +47,25 @@ def build_report_products(
     reports_root = provenance_root / "products" / "reports"
     reports_root.mkdir(parents=True, exist_ok=True)
 
+    _require_passed_report_input_validations(provenance_root)
+
     required_rows = _read_csv(required_path)
     ad_hoc_rows = _read_csv(ad_hoc_path)
 
-    _write_summary_workbook(reports_root / "summary.xlsx", required_rows, ad_hoc_rows)
-    _write_chart(reports_root / "chart.png", ad_hoc_rows)
-    _write_briefing(reports_root / "briefing.pptx", run_id, required_rows, ad_hoc_rows)
+    final_paths = {name: reports_root / name for name in REPORT_FILENAMES}
+    temporary_paths = {
+        name: _temporary_report_path(reports_root, Path(name).suffix) for name in REPORT_FILENAMES
+    }
+    try:
+        _write_summary_workbook(temporary_paths["summary.xlsx"], required_rows, ad_hoc_rows)
+        _write_chart(temporary_paths["chart.png"], ad_hoc_rows)
+        _write_briefing(temporary_paths["briefing.pptx"], run_id, required_rows, ad_hoc_rows)
+        _validate_report_products(temporary_paths)
+        for name in REPORT_FILENAMES:
+            temporary_paths[name].replace(final_paths[name])
+    finally:
+        for path in temporary_paths.values():
+            path.unlink(missing_ok=True)
 
     records = inventory_files(reports_root)
     return tuple(
@@ -66,6 +82,31 @@ def build_report_product_evidence(
 
     records = build_report_products(run_id=run_id, workspace_root=workspace_root)
     return tuple(_report_evidence(record) for record in records)
+
+
+def _temporary_report_path(root: Path, suffix: str) -> Path:
+    descriptor, name = tempfile.mkstemp(prefix=".report.", suffix=suffix, dir=root)
+    os.close(descriptor)
+    return Path(name)
+
+
+def _require_passed_report_input_validations(provenance_root: Path) -> None:
+    for name in ("required_extract", "ad_hoc_extract"):
+        path = provenance_root / "validations" / f"{name}.json"
+        if not path.is_file():
+            raise ValueError(f"report generation requires passed validation evidence: {path}")
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(loaded, dict) or loaded.get("status") != "pass":
+            raise ValueError(f"report generation requires passed {name} validation: {path}")
+
+
+def _validate_report_products(paths: dict[str, Path]) -> None:
+    workbook = load_workbook(paths["summary.xlsx"], read_only=True)
+    workbook.close()
+    if paths["chart.png"].read_bytes()[:8] != b"\x89PNG\r\n\x1a\n":
+        raise ValueError("generated chart is not a valid PNG")
+    presentation_class = getattr(import_module("pptx"), "Presentation")
+    presentation_class(paths["briefing.pptx"])
 
 
 def _resolve_product_path(path: Path | str | None, default: Path) -> Path:

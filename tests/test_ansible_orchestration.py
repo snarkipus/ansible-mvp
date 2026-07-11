@@ -31,7 +31,7 @@ def test_group_vars_define_documented_defaults_and_stage_order() -> None:
 
     assert group_vars["default_run_id"] == run_config["run"]["default_run_id"]
     assert group_vars["default_controlled_source_repo"] == "../controlled-source-demo"
-    assert group_vars["default_controlled_source_ref"] == "controlled-source-demo-v0.1.1"
+    assert group_vars["default_controlled_source_ref"] == "controlled-source-demo-v0.1.2"
     assert list(configured_harness_make_targets(ROOT / "configs/run.synthetic.yaml")) == [
         "preflight",
         "prepare-workspace",
@@ -43,8 +43,8 @@ def test_group_vars_define_documented_defaults_and_stage_order() -> None:
         "collect-mock-lsf",
         "extract-required",
         "extract-ad-hoc",
-        "build-reports",
         "validate",
+        "build-reports",
         "inventory-post",
         "manifest",
         "manifest-smoke",
@@ -61,6 +61,7 @@ def test_playbook_uses_documented_extra_vars_and_make_contract() -> None:
     assert play["hosts"] == "provenance_mvp"
     rendered_playbook = yaml.safe_dump(play)
     assert "run_id | default(default_run_id)" in rendered_playbook
+    assert "^[A-Za-z0-9][A-Za-z0-9._-]*$" in rendered_playbook
     assert "controlled_source_repo | default(default_controlled_source_repo)" in rendered_playbook
     assert "controlled_source_ref | default(default_controlled_source_ref)" in rendered_playbook
     assert "RUN_ID=" in rendered_playbook
