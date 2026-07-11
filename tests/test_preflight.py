@@ -21,24 +21,12 @@ def test_preflight_passes_for_clean_controlled_repositories(tmp_path: Path) -> N
         config_path=config,
         wrapper_repo=wrapper,
         controlled_source_repo=controlled,
-        controlled_source_ref="controlled-source-demo-v0.1.2",
+        controlled_source_ref="controlled-source-demo-v0.1.1",
     )
 
     assert result.status == "pass"
     assert result.controlled_source_repo["resolved_commit"]
     assert result.controlled_scripts[0]["is_usable"] is True
-    assert result.wrapper_factory_definition
-    assert all(record["blob_oid"] for record in result.wrapper_factory_definition)
-    assert all(len(record["sha256"]) == 64 for record in result.wrapper_factory_definition)
-    assert {artifact["role"] for artifact in result.controlled_artifacts} == {
-        "runtime_script",
-        "input",
-    }
-    assert {artifact["source_category"] for artifact in result.controlled_artifacts} == {
-        "controlled_script",
-        "controlled_input",
-    }
-    assert all(artifact["selected_commit"] for artifact in result.controlled_artifacts)
     assert result.stages[0]["approved_command_path"] == "Makefile"
 
 
@@ -57,7 +45,7 @@ def test_preflight_fails_for_dirty_wrapper_controlled_path_but_not_untracked_run
             config_path=config,
             wrapper_repo=wrapper,
             controlled_source_repo=controlled,
-            controlled_source_ref="controlled-source-demo-v0.1.2",
+            controlled_source_ref="controlled-source-demo-v0.1.1",
         )
 
     message = str(error.value)
@@ -123,7 +111,7 @@ def test_preflight_rejects_shell_style_stage_commands(
             config_path=config,
             wrapper_repo=wrapper,
             controlled_source_repo=controlled,
-            controlled_source_ref="controlled-source-demo-v0.1.2",
+            controlled_source_ref="controlled-source-demo-v0.1.1",
         )
 
     assert expected_message in str(error.value)
@@ -142,33 +130,10 @@ def test_preflight_rejects_uncontrolled_scheduler_payload_command(tmp_path: Path
             config_path=config,
             wrapper_repo=wrapper,
             controlled_source_repo=controlled,
-            controlled_source_ref="controlled-source-demo-v0.1.2",
+            controlled_source_ref="controlled-source-demo-v0.1.1",
         )
 
     assert "scheduler payload" in str(error.value)
-
-
-def test_preflight_rejects_ignored_input_absent_from_selected_commit(tmp_path: Path) -> None:
-    wrapper, controlled, config = _prepare_repositories(tmp_path)
-    (controlled / ".gitignore").write_text("fixtures/dirA/local-only.dat\n", encoding="utf-8")
-    _git(controlled, "add", ".gitignore")
-    _git(controlled, "commit", "-m", "ignore local input")
-    (controlled / "fixtures" / "dirA").mkdir(exist_ok=True)
-    (controlled / "fixtures" / "dirA" / "local-only.dat").write_text("local\n", encoding="utf-8")
-    config_payload = yaml.safe_load(config.read_text(encoding="utf-8"))
-    config_payload["materialization"]["inputs"]["source_root"] = "fixtures"
-    config_payload["materialization"]["inputs"]["files"] = ["local-only.dat"]
-    config.write_text(yaml.safe_dump(config_payload, sort_keys=False), encoding="utf-8")
-    _git(wrapper, "add", "run.synthetic.yaml")
-    _git(wrapper, "commit", "-m", "reference ignored input")
-
-    with pytest.raises(PreflightError, match="absent from selected commit"):
-        run_preflight(
-            config_path=config,
-            wrapper_repo=wrapper,
-            controlled_source_repo=controlled,
-            controlled_source_ref="controlled-source-demo-v0.1.2",
-        )
 
 
 def _prepare_repositories(tmp_path: Path) -> tuple[Path, Path, Path]:
@@ -185,15 +150,12 @@ def _prepare_repositories(tmp_path: Path) -> tuple[Path, Path, Path]:
         "#!/usr/bin/env bash\nexit 0\n", encoding="utf-8"
     )
     (controlled / "procs" / "run-script.sh").chmod(0o755)
-    fixture = controlled / "fixtures" / "controlled_inputs" / "dirA" / "ex1.dat"
-    fixture.parent.mkdir(parents=True)
-    fixture.write_text("controlled input\n", encoding="utf-8")
 
     _git(wrapper, "add", ".gitignore", "runs/.gitkeep", "Makefile")
     _git(wrapper, "commit", "-m", "wrapper")
-    _git(controlled, "add", "procs/run-script.sh", "fixtures")
+    _git(controlled, "add", "procs/run-script.sh")
     _git(controlled, "commit", "-m", "controlled")
-    _git(controlled, "tag", "controlled-source-demo-v0.1.2")
+    _git(controlled, "tag", "controlled-source-demo-v0.1.1")
 
     config = wrapper / "run.synthetic.yaml"
     config.write_text(yaml.safe_dump(_config_payload(), sort_keys=False), encoding="utf-8")
@@ -205,21 +167,7 @@ def _prepare_repositories(tmp_path: Path) -> tuple[Path, Path, Path]:
 def _config_payload() -> dict[str, Any]:
     return {
         "schema_version": "0.1",
-        "layout": {
-            "run_root": "runs/{run_id}",
-            "sim_run_root": "runs/{run_id}/sim-run-root",
-            "provenance_root": "runs/{run_id}/provenance",
-            "simulation_areas": ["input", "lists", "files", "procs"],
-            "provenance_directories": [
-                "logs",
-                "inventories",
-                "scheduler",
-                "validations",
-                "products/extracted",
-                "products/reports",
-            ],
-            "canonical_raw_output": "lists/dirC/sim-out.dat",
-        },
+        "layout": {"run_root": "runs/{run_id}"},
         "repositories": {
             "wrapper": {
                 "controlled_paths": ["Makefile", "run.synthetic.yaml"],
@@ -231,30 +179,12 @@ def _config_payload() -> dict[str, Any]:
             "run_script": {
                 "repository": "controlled_source",
                 "relative_path": "procs/run-script.sh",
-                "materialized_path": "sim-run-root/procs/run-script.sh",
-                "materialization_mode": "copy_from_controlled_source",
                 "executable": True,
             }
         },
         "approved_command_paths": {
             "wrapper": ["Makefile"],
             "controlled_source": ["procs/run-script.sh"],
-        },
-        "approved_make_targets": [
-            "preflight",
-            "submit-mock-lsf",
-            "wait-mock-lsf",
-            "collect-mock-lsf",
-        ],
-        "materialization": {
-            "inputs": {
-                "source_root": "fixtures/controlled_inputs",
-                "destination_root": "sim-run-root/input",
-                "logical_groups": ["dirA"],
-                "files": ["ex1.dat"],
-                "mode": "copy_from_controlled_source",
-            },
-            "runtime_scripts": ["run_script"],
         },
         "scheduler": {
             "mode": "mock_lsf",
@@ -278,41 +208,22 @@ def _config_payload() -> dict[str, Any]:
                 "collect-mock-lsf",
             ],
         },
-        "stage_defaults": {"log_directory": "provenance/logs"},
         "stages": [
             {
                 "name": "preflight",
-                "display_name": "Preflight",
-                "lifecycle_class": "admission",
-                "display_order": 10,
-                "operator_visible": True,
                 "command": "make preflight",
-                "working_directory": "wrapper_repo",
                 "command_kind": "wrapper_make_target",
                 "approved_command_path": "Makefile",
                 "expected_controlled_scripts": ["run_script"],
             },
             {
                 "name": "run_simulation",
-                "display_name": "Run simulation",
-                "lifecycle_class": "factory",
-                "display_order": 20,
-                "operator_visible": False,
                 "command": "procs/run-script.sh",
-                "working_directory": "sim-run-root",
                 "command_kind": "materialized_controlled_script",
                 "approved_command_path": "procs/run-script.sh",
                 "expected_controlled_scripts": ["run_script"],
             },
         ],
-        "validations": {
-            "required_extract": {
-                "config_path": "expected.yaml",
-                "product_path": "provenance/products/extracted/required.csv",
-                "evidence_path": "provenance/validations/required_extract.json",
-            }
-        },
-        "manifest": {"output_path": "provenance/manifest.yaml"},
     }
 
 

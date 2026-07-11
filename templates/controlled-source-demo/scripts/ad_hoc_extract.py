@@ -4,9 +4,7 @@
 from __future__ import annotations
 
 import csv
-import os
 import sys
-import tempfile
 from collections import defaultdict
 from pathlib import Path
 
@@ -33,25 +31,17 @@ def main() -> int:
             counts[logical_group] += 1
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, temporary_name = tempfile.mkstemp(prefix=".ad_hoc.csv.", dir=output_path.parent)
-    temporary_path = Path(temporary_name)
-    try:
-        with os.fdopen(descriptor, "w", newline="", encoding="utf-8") as output_file:
-            writer = csv.DictWriter(
-                output_file, fieldnames=["logical_group", "input_count", "total_bytes"]
+    with output_path.open("w", newline="", encoding="utf-8") as output_file:
+        writer = csv.DictWriter(output_file, fieldnames=["logical_group", "input_count", "total_bytes"])
+        writer.writeheader()
+        for logical_group in sorted(counts):
+            writer.writerow(
+                {
+                    "logical_group": logical_group,
+                    "input_count": counts[logical_group],
+                    "total_bytes": totals[logical_group],
+                }
             )
-            writer.writeheader()
-            for logical_group in sorted(counts):
-                writer.writerow(
-                    {
-                        "logical_group": logical_group,
-                        "input_count": counts[logical_group],
-                        "total_bytes": totals[logical_group],
-                    }
-                )
-        temporary_path.replace(output_path)
-    finally:
-        temporary_path.unlink(missing_ok=True)
 
     return 0
 

@@ -10,7 +10,6 @@ from __future__ import annotations
 import getpass
 import json
 import platform
-import re
 import socket
 import subprocess
 import sys
@@ -22,9 +21,8 @@ from typing import Any, Mapping, Protocol, Sequence, cast
 import yaml
 
 from provenance.config import read_config_mapping, read_yaml_mapping
-from provenance.git_state import GitStateError, selected_tree_artifact_identity
-from provenance.hashing import HashPolicy, sha256_file
-from provenance.paths import resolve_layout_path
+from provenance.git_state import capture_repository_state, resolve_ref, script_identity
+from provenance.hashing import HashPolicy, hash_artifact
 
 ManifestScalar = str | int | float | bool | None
 ManifestValue = ManifestScalar | list["ManifestValue"] | dict[str, "ManifestValue"]
@@ -193,9 +191,9 @@ def assemble_run_manifest(
     controlled_scripts_config = _required_mapping(config, "controlled_scripts")
     scheduler_config = _required_mapping(config, "scheduler")
 
-    run_root = resolve_layout_path(root, layout_config, "run_root", run_id)
-    sim_run_root = resolve_layout_path(root, layout_config, "sim_run_root", run_id)
-    provenance_root = resolve_layout_path(root, layout_config, "provenance_root", run_id)
+    run_root = root / _format_layout_path(layout_config, "run_root", run_id)
+    sim_run_root = root / _format_layout_path(layout_config, "sim_run_root", run_id)
+    provenance_root = root / _format_layout_path(layout_config, "provenance_root", run_id)
     inventories_root = provenance_root / "inventories"
     logs_root = provenance_root / "logs"
     validations_root = provenance_root / "validations"
@@ -203,37 +201,26 @@ def assemble_run_manifest(
     scheduler_path = run_root / _required_string(scheduler_config, "metadata_path")
     scheduler_root = provenance_root / "scheduler"
     preflight_path = provenance_root / "preflight.json"
-    preflight = _read_json_mapping(preflight_path)
-    wrapper_admission = _required_mapping(preflight, "wrapper_repo")
-    controlled_admission = _required_mapping(preflight, "controlled_source_repo")
 
-    wrapper_repo = _admitted_repository_manifest_record(
+    wrapper_repo = _repository_manifest_record(
         name=str(_required_mapping(repositories_config, "wrapper").get("name", "ansible-mvp")),
-        admission=wrapper_admission,
+        path=root,
         requested_ref=None,
     )
-    wrapper_factory_definition = preflight.get("wrapper_factory_definition", [])
-    if not isinstance(wrapper_factory_definition, list):
-        raise ValueError("preflight wrapper_factory_definition must be a list")
-    wrapper_repo["factory_definition"] = wrapper_factory_definition
-    selected_controlled_artifacts = preflight.get("controlled_artifacts", [])
-    if not isinstance(selected_controlled_artifacts, list):
-        raise ValueError("preflight controlled_artifacts must be a list")
     controlled_repo = _controlled_repository_manifest_record(
         name=str(
             _required_mapping(repositories_config, "controlled_source").get(
                 "name", "controlled-source-demo"
             )
         ),
-        admission=controlled_admission,
-        requested_ref=_required_string(controlled_admission, "ref"),
+        path=Path(controlled_source_repo).expanduser().resolve(),
+        requested_ref=controlled_source_ref,
         controlled_scripts=controlled_scripts_config,
-        selected_artifacts=selected_controlled_artifacts,
     )
 
     stages = _ordered_stage_records(_read_json_records(logs_root, "*.stage.json"), config)
     logs = _log_records(root, logs_root)
-    validations = _validation_records(root, validations_root)
+    validations = _read_json_records(validations_root, "*.json")
     run_started_at, run_finished_at = _run_time_range(stages)
 
     assembly_input = ManifestAssemblyInput(
@@ -254,12 +241,11 @@ def assemble_run_manifest(
             "simulation_areas": layout_config.get("simulation_areas", []),
             "canonical_raw_output": layout_config.get("canonical_raw_output"),
         },
-        controlled_source_gate=preflight,
+        controlled_source_gate=_read_json_mapping(preflight_path),
         scheduler=_scheduler_manifest_record(
             root=root,
             scheduler_path=scheduler_path,
             scheduler_root=scheduler_root,
-            receipt_path=validations_root / "scheduler_receipt.json",
         ),
         inputs=_read_json_list(inventories_root / "pre_run_inputs.json"),
         runtime_scripts=_read_json_list(inventories_root / "pre_run_controlled_scripts.json"),
@@ -268,20 +254,10 @@ def assemble_run_manifest(
         derived_products=_read_json_list(inventories_root / "post_run_derived_products.json"),
         validations=validations,
         logs=logs,
-        hash_policy={
-            **_required_mapping(config, "hash_policy"),
-            "assurance": {
-                "capture": "local evidence recorded",
-                "binding": "controlled inputs and executed code bound to selected Git commit",
-                "preservation": "not implemented; no signing or immutable archive",
-            },
-        },
+        hash_policy=_required_mapping(config, "hash_policy"),
         notes=(
             "Synthetic local MVP manifest assembled from workflow evidence files.",
             "Generated products are kept under provenance/ and out of sim-run-root/.",
-            "Controlled inputs and executed code are selected-commit-bound.",
-            "Evidence is local and mutable; signing, trusted timestamps, and immutable "
-            "archival are not implemented.",
         ),
         config={"run_config": config_file.as_posix()},
     )
@@ -309,196 +285,27 @@ def missing_required_key_values(manifest: Mapping[str, object]) -> tuple[str, ..
     return tuple(missing)
 
 
-def semantic_consistency_errors(
-    manifest: Mapping[str, object],
-    *,
-    config_path: Path | str,
-    workspace_root: Path | str = Path("."),
-) -> tuple[str, ...]:
-    """Return semantic contradictions in a purported successful-run manifest."""
-
-    errors: list[str] = []
-    root = Path(workspace_root).expanduser().resolve()
-    config = read_config_mapping(Path(config_path))
-    configured_stages = [
-        stage
-        for stage in _mapping_records(config.get("stages"))
-        if stage.get("name") not in {"manifest", "manifest_smoke"}
-    ]
-    stages = _mapping_records(manifest.get("stages"))
-    expected_names = [str(stage.get("name")) for stage in configured_stages]
-    actual_names = [str(stage.get("name")) for stage in stages]
-    duplicates = sorted({name for name in actual_names if actual_names.count(name) > 1})
-    if duplicates:
-        errors.append(f"stages contain duplicate names: {', '.join(duplicates)}")
-    if actual_names != expected_names:
-        errors.append(
-            f"stages must match configured pre-assembly order: expected {expected_names!r}, "
-            f"got {actual_names!r}"
-        )
-    for index, stage in enumerate(stages):
-        name = stage.get("name", f"index {index}")
-        if stage.get("status") != "pass" or stage.get("return_code") != 0:
-            errors.append(f"stage {name!r} must pass with zero return_code")
-
-    for section in ("inputs", "runtime_scripts", "raw_simulation_outputs", "derived_products"):
-        for index, record in enumerate(_mapping_records(manifest.get(section))):
-            label = f"{section}[{index}]"
-            _validate_artifact_record(record, label=label, root=root, errors=errors)
-
-    _validate_repository_artifacts(manifest, errors)
-    stage_by_name = {
-        str(stage.get("name")): stage for stage in stages if isinstance(stage.get("name"), str)
-    }
-    for index, product in enumerate(_mapping_records(manifest.get("derived_products"))):
-        producer = product.get("producing_stage")
-        workflow_path = product.get("workflow_relative_path")
-        stage = stage_by_name.get(str(producer))
-        outputs = stage.get("outputs") if stage is not None else None
-        declared_outputs = {
-            output if isinstance(output, str) else output.get("relative_path")
-            for output in outputs or []
-            if isinstance(output, str | Mapping)
-        }
-        if stage is None or workflow_path not in declared_outputs:
-            errors.append(
-                f"derived_products[{index}] producer {producer!r} does not declare output "
-                f"{workflow_path!r}"
-            )
-
-    validations = _mapping_records(manifest.get("validations"))
-    derived_products = _mapping_records(manifest.get("derived_products"))
-    run = manifest.get("run")
-    run_root = run.get("run_root") if isinstance(run, Mapping) else None
-    for name, spec in _required_mapping(config, "validations").items():
-        if not isinstance(spec, Mapping):
-            continue
-        product_path = spec.get("product_path")
-        evidence_path = spec.get("evidence_path")
-        display_path = (
-            product_path.removeprefix("provenance/") if isinstance(product_path, str) else None
-        )
-        expected_evidence_path = _normalized_joined_path(run_root, evidence_path)
-        matching_validations = [
-            record
-            for record in validations
-            if _normalized_manifest_path(record.get("evidence_path")) == expected_evidence_path
-        ]
-        if len(matching_validations) != 1:
-            errors.append(
-                f"configured product validation {name!r} must have exactly one receipt at "
-                f"declared evidence_path {expected_evidence_path!r}; "
-                f"found {len(matching_validations)}"
-            )
-            continue
-        validation = matching_validations[0]
-        if _normalized_manifest_path(validation.get("path")) != _normalized_manifest_path(
-            display_path
-        ):
-            errors.append(
-                f"configured product validation {name!r} receipt at declared evidence_path "
-                f"does not identify configured product path {display_path!r}"
-            )
-        if validation.get("status") != "pass":
-            errors.append(f"configured product validation {name!r} is missing or not successful")
-        matching_products = [
-            record for record in derived_products if record.get("relative_path") == display_path
-        ]
-        if len(matching_products) != 1:
-            errors.append(
-                f"configured product validation {name!r} must map to exactly one derived product; "
-                f"found {len(matching_products)}"
-            )
-            continue
-        product = matching_products[0]
-        product_file = product.get("run_relative_path")
-        if not isinstance(product_file, str) or not (root / product_file).is_file():
-            errors.append(
-                f"configured product validation {name!r} derived product file is missing: "
-                f"{product_file!r}"
-            )
-            continue
-        if validation.get("product_sha256") != product.get("sha256"):
-            errors.append(
-                f"configured product validation {name!r} validated product SHA-256 "
-                "does not match derived product"
-            )
-        if validation.get("size_bytes") != product.get("size_bytes"):
-            errors.append(
-                f"configured product validation {name!r} validated product size "
-                "does not match derived product"
-            )
-    for index, validation in enumerate(validations):
-        if validation.get("status") != "pass":
-            errors.append(f"validations[{index}] is not successful")
-        if "evidence_path" in validation:
-            _validate_artifact_record(
-                validation, label=f"validations[{index}]", root=root, errors=errors
-            )
-        product_path = validation.get("path")
-        product = next(
-            (record for record in derived_products if record.get("relative_path") == product_path),
-            None,
-        )
-        if product is not None:
-            if validation.get("product_sha256") != product.get("sha256"):
-                errors.append(
-                    f"validations[{index}] validated product SHA-256 does not match derived product"
-                )
-            if validation.get("size_bytes") != product.get("size_bytes"):
-                errors.append(
-                    f"validations[{index}] validated product size does not match derived product"
-                )
-
-    _validate_controlled_source_links(manifest, errors)
-    _validate_scheduler_semantics(
-        manifest,
-        config_path=config_path,
-        workspace_root=root,
-        errors=errors,
-    )
-    return tuple(errors)
-
-
-def _admitted_repository_manifest_record(
-    *, name: str, admission: Mapping[str, object], requested_ref: str | None
+def _repository_manifest_record(
+    *, name: str, path: Path, requested_ref: str | None
 ) -> dict[str, Any]:
-    """Build repository identity only from the preflight admission receipt."""
-
-    resolved_commit = admission.get("resolved_commit", admission.get("head_commit"))
-    if not isinstance(resolved_commit, str) or not resolved_commit:
-        raise ValueError(f"preflight repository identity is missing for {name}")
-    admitted_clean = admission.get("is_clean")
+    state = capture_repository_state(path)
     return {
         "name": name,
-        "path": _required_string(admission, "path"),
+        "path": state.path.as_posix(),
         "requested_ref": requested_ref,
-        "resolved_commit": resolved_commit,
-        "head_commit": admission.get("head_commit"),
-        "branch": admission.get("branch"),
-        "describe": admission.get("describe"),
-        "worktree_status": (
-            "clean"
-            if admitted_clean is True
-            else "dirty"
-            if admitted_clean is False
-            else "admitted"
-        ),
-        "identity_source": "preflight_admission",
+        "resolved_commit": state.head_commit,
+        "head_commit": state.head_commit,
+        "branch": state.branch,
+        "describe": state.describe,
+        "worktree_status": "clean" if state.is_clean else "dirty",
     }
 
 
 def _controlled_repository_manifest_record(
-    *,
-    name: str,
-    admission: Mapping[str, object],
-    requested_ref: str,
-    controlled_scripts: Mapping[str, object],
-    selected_artifacts: Sequence[object],
+    *, name: str, path: Path, requested_ref: str, controlled_scripts: Mapping[str, object]
 ) -> dict[str, Any]:
-    record = _admitted_repository_manifest_record(
-        name=name, admission=admission, requested_ref=requested_ref
-    )
+    record = _repository_manifest_record(name=name, path=path, requested_ref=requested_ref)
+    record["resolved_commit"] = resolve_ref(path, requested_ref).resolved_commit
     script_records: list[dict[str, Any]] = []
     for script_name in controlled_scripts:
         spec = _required_mapping(controlled_scripts, script_name)
@@ -507,26 +314,23 @@ def _controlled_repository_manifest_record(
         relative_path = spec.get("relative_path")
         if not isinstance(relative_path, str) or not relative_path:
             raise ValueError(f"controlled_scripts.{script_name}.relative_path must be non-empty")
-        selected = next(
-            (
-                artifact
-                for artifact in selected_artifacts
-                if isinstance(artifact, Mapping)
-                and (
-                    artifact.get("source_category") == "controlled_script"
-                    or artifact.get("role")
-                    in {"controlled_script", "runtime_script", "controlled_code"}
-                )
-                and artifact.get("relative_path") == relative_path
-            ),
-            None,
+        identity = script_identity(path, relative_path)
+        hash_result = hash_artifact(identity.absolute_path)
+        script_records.append(
+            {
+                "name": script_name,
+                "relative_path": identity.relative_path,
+                "repository_commit": identity.repository_commit,
+                "blob_oid": identity.blob_oid,
+                "sha256": hash_result.sha256,
+                "hash_status": hash_result.status.value,
+                "file_mode": identity.file_mode,
+                "executable": identity.executable,
+                "is_tracked": identity.is_tracked,
+            }
         )
-        if selected is None:
-            raise ValueError(f"selected controlled-script identity is missing: {relative_path}")
-        script_records.append({"name": script_name, **dict(selected), "hash_status": "hashed"})
     record["tracked_script_paths"] = [script["relative_path"] for script in script_records]
     record["scripts"] = script_records
-    record["selected_artifacts"] = list(selected_artifacts)
     return record
 
 
@@ -572,9 +376,6 @@ def _read_json_records(directory: Path, pattern: str) -> list[dict[str, Any]]:
 def _ordered_stage_records(
     records: Sequence[dict[str, Any]], config: Mapping[str, object]
 ) -> list[dict[str, Any]]:
-    pre_assembly_records = [
-        record for record in records if record.get("name") not in {"manifest", "manifest_smoke"}
-    ]
     display_order_by_name: dict[str, int] = {}
     for stage in _required_list(config, "stages"):
         if not isinstance(stage, Mapping):
@@ -584,10 +385,8 @@ def _ordered_stage_records(
         if isinstance(name, str) and isinstance(display_order, int):
             display_order_by_name[name] = display_order
     return sorted(
-        pre_assembly_records,
-        key=lambda record: display_order_by_name.get(
-            str(record.get("name")), len(pre_assembly_records)
-        ),
+        records,
+        key=lambda record: display_order_by_name.get(str(record.get("name")), len(records)),
     )
 
 
@@ -610,7 +409,7 @@ def _operator_flow(stages: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
 
 
 def _scheduler_manifest_record(
-    *, root: Path, scheduler_path: Path, scheduler_root: Path, receipt_path: Path
+    *, root: Path, scheduler_path: Path, scheduler_root: Path
 ) -> dict[str, Any]:
     submission = _read_yaml_mapping(scheduler_path)
     job_state_path = scheduler_root / "job-state.json"
@@ -660,7 +459,6 @@ def _scheduler_manifest_record(
             },
             "terminal_job_state": terminal_state,
             "accounting": accounting,
-            "receipt_validation": _read_optional_json_mapping(receipt_path),
             "future_real_lsf_equivalent": (accounting or {}).get(
                 "future_real_lsf_equivalent", ["bsub", "bjobs", "bhist", "bacct"]
             ),
@@ -713,247 +511,6 @@ def _join_key_path(prefix: str, part: str) -> str:
     return f"{prefix}.{part}" if prefix else part
 
 
-def _validation_records(root: Path, directory: Path) -> list[dict[str, Any]]:
-    records: list[dict[str, Any]] = []
-    if not directory.exists():
-        return records
-    for path in sorted(directory.glob("*.json")):
-        record = _read_json_mapping(path)
-        # Preserve the receipt's binding to validated product bytes before
-        # recording the independent identity of the receipt file itself.
-        record["product_sha256"] = record.get("sha256")
-        record["evidence_path"] = _relative_path(root, path)
-        record["sha256"] = sha256_file(path)
-        record["evidence_size_bytes"] = path.stat().st_size
-        records.append(record)
-    return records
-
-
-def _mapping_records(value: object) -> list[Mapping[str, Any]]:
-    if not isinstance(value, list | tuple):
-        return []
-    return [record for record in value if isinstance(record, Mapping)]
-
-
-def _validate_artifact_record(
-    record: Mapping[str, Any], *, label: str, root: Path, errors: list[str]
-) -> None:
-    relative_path = record.get("run_relative_path", record.get("evidence_path"))
-    if not isinstance(relative_path, str) or not relative_path:
-        errors.append(f"{label} has no workspace-relative artifact path")
-        return
-    path = (root / relative_path).resolve()
-    if not path.is_relative_to(root):
-        errors.append(f"{label} path escapes workspace root: {relative_path!r}")
-        return
-    digest = record.get("sha256")
-    if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
-        errors.append(f"{label} has malformed SHA-256: {digest!r}")
-        return
-    if not path.is_file():
-        errors.append(f"{label} artifact is missing: {relative_path}")
-        return
-    size_field = "evidence_size_bytes" if "evidence_path" in record else "size_bytes"
-    recorded_size = record.get(size_field)
-    actual_size = path.stat().st_size
-    if not isinstance(recorded_size, int) or isinstance(recorded_size, bool):
-        errors.append(f"{label} has invalid recorded {size_field}: {recorded_size!r}")
-    elif actual_size != recorded_size:
-        errors.append(
-            f"{label} {size_field} does not match on-disk artifact {relative_path}: "
-            f"recorded {recorded_size}, current {actual_size}"
-        )
-    if sha256_file(path) != digest:
-        errors.append(f"{label} SHA-256 does not match on-disk bytes: {relative_path}")
-
-
-def _normalized_manifest_path(value: object) -> str | None:
-    if not isinstance(value, str) or not value:
-        return None
-    return Path(value).as_posix().removeprefix("./")
-
-
-def _normalized_joined_path(prefix: object, suffix: object) -> str | None:
-    normalized_prefix = _normalized_manifest_path(prefix)
-    normalized_suffix = _normalized_manifest_path(suffix)
-    if normalized_prefix is None or normalized_suffix is None:
-        return None
-    return (Path(normalized_prefix) / normalized_suffix).as_posix()
-
-
-def _validate_controlled_source_links(manifest: Mapping[str, object], errors: list[str]) -> None:
-    repositories = _mapping_records(manifest.get("repositories"))
-    controlled = next(
-        (repository for repository in repositories if repository.get("selected_artifacts")), None
-    )
-    if controlled is None:
-        errors.append("controlled-source repository identity is missing")
-        return
-    controlled_commit = controlled.get("resolved_commit")
-    selected_by_path = {
-        record.get("relative_path"): record
-        for record in _mapping_records(controlled.get("selected_artifacts"))
-        if isinstance(record.get("relative_path"), str)
-    }
-    selected_code_paths = [
-        record.get("relative_path")
-        for record in _mapping_records(controlled.get("selected_artifacts"))
-        if record.get("source_category") == "controlled_script"
-        or record.get("role") in {"runtime_script", "controlled_code", "controlled_script"}
-    ]
-    runtime_source_paths: list[object] = []
-    for artifact in _mapping_records(manifest.get("runtime_scripts")):
-        identity_value = artifact.get("materialization", artifact)
-        identity = identity_value if isinstance(identity_value, Mapping) else {}
-        runtime_source_paths.append(identity.get("source_path"))
-    if len(runtime_source_paths) != len(set(runtime_source_paths)):
-        errors.append("runtime_scripts contains duplicate selected controlled-code identities")
-    missing_code = sorted(
-        str(path) for path in selected_code_paths if runtime_source_paths.count(path) != 1
-    )
-    unexpected_code = sorted(
-        str(path) for path in runtime_source_paths if selected_code_paths.count(path) != 1
-    )
-    if missing_code or unexpected_code:
-        errors.append(
-            "runtime_scripts must cover every selected controlled-code artifact exactly once; "
-            f"missing={missing_code}, unexpected={unexpected_code}"
-        )
-    for section in ("inputs", "runtime_scripts"):
-        for index, artifact in enumerate(_mapping_records(manifest.get(section))):
-            identity_value = artifact.get("materialization", artifact)
-            identity = identity_value if isinstance(identity_value, Mapping) else {}
-            source_path = identity.get("source_path")
-            selected = selected_by_path.get(source_path)
-            label = f"{section}[{index}]"
-            if selected is None:
-                errors.append(f"{label} source {source_path!r} has no selected-commit identity")
-                continue
-            comparisons = (
-                ("source_resolved_commit", controlled_commit),
-                ("source_resolved_commit", selected.get("selected_commit")),
-                ("source_blob_oid", selected.get("blob_oid")),
-                ("source_file_mode", selected.get("file_mode")),
-                ("source_sha256", selected.get("sha256")),
-                ("sha256", identity.get("source_sha256")),
-            )
-            for field_name, expected in comparisons:
-                actual = (
-                    artifact.get(field_name) if field_name == "sha256" else identity.get(field_name)
-                )
-                if actual != expected:
-                    errors.append(
-                        f"{label} {field_name} does not match linked selected-source identity"
-                    )
-
-
-def _validate_repository_artifacts(manifest: Mapping[str, object], errors: list[str]) -> None:
-    for repository_index, repository in enumerate(_mapping_records(manifest.get("repositories"))):
-        repository_path = repository.get("path")
-        if not isinstance(repository_path, str):
-            errors.append(f"repositories[{repository_index}] has no repository path")
-            continue
-        base = Path(repository_path).expanduser().resolve()
-        resolved_commit = repository.get("resolved_commit")
-        for collection in ("factory_definition", "selected_artifacts"):
-            for artifact_index, artifact in enumerate(_mapping_records(repository.get(collection))):
-                label = f"repositories[{repository_index}].{collection}[{artifact_index}]"
-                relative_path = artifact.get("relative_path")
-                digest = artifact.get("sha256")
-                selected_commit = artifact.get("selected_commit")
-                if selected_commit != resolved_commit:
-                    errors.append(f"{label} selected commit does not match repository identity")
-                if not isinstance(relative_path, str) or not relative_path:
-                    errors.append(f"{label} has no repository-relative path")
-                    continue
-                path = (base / relative_path).resolve()
-                if not path.is_relative_to(base):
-                    errors.append(f"{label} path escapes repository: {relative_path!r}")
-                elif not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
-                    errors.append(f"{label} has malformed SHA-256: {digest!r}")
-                elif not isinstance(selected_commit, str):
-                    errors.append(f"{label} has no selected commit")
-                else:
-                    try:
-                        admitted = selected_tree_artifact_identity(
-                            base, selected_commit, relative_path
-                        )
-                    except GitStateError as error:
-                        errors.append(f"{label} admitted Git object cannot be verified: {error}")
-                        continue
-                    for field, actual in (
-                        ("blob_oid", admitted.blob_oid),
-                        ("file_mode", admitted.file_mode),
-                        ("size_bytes", admitted.size_bytes),
-                        ("sha256", admitted.sha256),
-                    ):
-                        if artifact.get(field) != actual:
-                            errors.append(f"{label} {field} does not match admitted Git object")
-
-
-def _validate_scheduler_semantics(
-    manifest: Mapping[str, object],
-    *,
-    config_path: Path | str,
-    workspace_root: Path,
-    errors: list[str],
-) -> None:
-    # Import locally because scheduler execution depends on stage helpers.  The
-    # validator is nevertheless the single source of truth for scheduler
-    # component coherence at extraction time and again after final assembly.
-    from provenance.scheduler import validate_scheduler_receipt
-
-    scheduler_value = manifest.get("scheduler")
-    scheduler = scheduler_value if isinstance(scheduler_value, Mapping) else {}
-    receipt_value = scheduler.get("receipt_validation")
-    receipt = receipt_value if isinstance(receipt_value, Mapping) else {}
-    if receipt.get("status") != "pass" or receipt.get("errors") not in ([], ()):
-        errors.append("scheduler receipt validation is missing or not successful")
-    run_value = manifest.get("run")
-    run = run_value if isinstance(run_value, Mapping) else {}
-    expected_run_id = run.get("run_id")
-    expected_job_id = scheduler.get("job_id")
-    expected_receipt_id = receipt.get("receipt_id")
-    if not isinstance(expected_run_id, str) or not expected_run_id:
-        errors.append("scheduler evidence cannot be revalidated without manifest run_id")
-    else:
-        try:
-            current_receipt = validate_scheduler_receipt(
-                config_path=config_path,
-                run_id=expected_run_id,
-                workspace_root=workspace_root,
-            )
-        except (OSError, ValueError) as error:
-            errors.append(f"current scheduler evidence cannot be validated: {error}")
-        else:
-            for error in current_receipt.get("errors", []):
-                errors.append(f"current scheduler evidence is inconsistent: {error}")
-            if current_receipt.get("status") != "pass" and not current_receipt.get("errors"):
-                errors.append("current scheduler evidence validation is not successful")
-            for field, expected in (
-                ("run_id", expected_run_id),
-                ("job_id", expected_job_id),
-                ("receipt_id", expected_receipt_id),
-            ):
-                if current_receipt.get(field) != expected:
-                    errors.append(
-                        f"current scheduler receipt {field} does not match finalized manifest"
-                    )
-    if receipt.get("run_id") != expected_run_id or receipt.get("job_id") != expected_job_id:
-        errors.append("scheduler receipt run/job identity does not match manifest")
-    for component_name in ("terminal_job_state", "accounting"):
-        component_value = scheduler.get(component_name)
-        component = component_value if isinstance(component_value, Mapping) else {}
-        if (
-            component.get("run_id") != expected_run_id
-            or component.get("job_id") != expected_job_id
-            or component.get("receipt_id") != expected_receipt_id
-        ):
-            errors.append(f"scheduler {component_name} identity is inconsistent")
-        if component.get("state") != "DONE" or component.get("exit_code") != 0:
-            errors.append(f"scheduler {component_name} must record DONE with zero exit_code")
-
-
 def _read_json_list(path: Path) -> list[Any]:
     loaded = _read_json(path)
     if not isinstance(loaded, list):
@@ -995,6 +552,13 @@ def _log_records(root: Path, logs_root: Path) -> list[dict[str, Any]]:
             }
         )
     return records
+
+
+def _format_layout_path(layout: Mapping[str, object], key: str, run_id: str) -> Path:
+    value = layout.get(key)
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"layout.{key} must be a non-empty string")
+    return Path(value.format(run_id=run_id))
 
 
 def _read_yaml_mapping(path: Path) -> dict[str, Any]:

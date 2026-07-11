@@ -14,8 +14,6 @@ from typing import Any
 from provenance.config import read_config_mapping
 from provenance.hashing import hash_artifact
 from provenance.inventory import infer_metadata
-from provenance.paths import resolve_layout_path, resolve_root_relative_path
-from provenance.workspace import verify_materialization_evidence
 
 
 @dataclass(frozen=True)
@@ -117,14 +115,14 @@ def stage_attempt_evidence(
     config = _read_yaml_mapping(Path(config_path))
     layout = _mapping(config.get("layout"), "layout")
     stage = _stage_by_name(config, stage_name)
-    run_root = resolve_layout_path(root, layout, "run_root", run_id)
-    sim_run_root = resolve_layout_path(root, layout, "sim_run_root", run_id)
+    run_root = root / _format_layout_path(layout, "run_root", run_id)
+    sim_run_root = root / _format_layout_path(layout, "sim_run_root", run_id)
     controlled_root = (
         Path(controlled_source_repo).expanduser().resolve()
         if controlled_source_repo is not None
         else root
     )
-    provenance_root = resolve_layout_path(root, layout, "provenance_root", run_id)
+    provenance_root = root / _format_layout_path(layout, "provenance_root", run_id)
     log_root = provenance_root / "logs"
     log_root.mkdir(parents=True, exist_ok=True)
 
@@ -210,13 +208,13 @@ def run_synthetic_simulation(
         raise ValueError("run_id must be non-empty")
 
     root = Path(workspace_root).expanduser().resolve()
+    controlled_root = Path(controlled_source_repo).expanduser().resolve()
     config = _read_yaml_mapping(Path(config_path))
     layout = _mapping(config.get("layout"), "layout")
     stage = _stage_by_name(config, "run_simulation")
-    run_root = resolve_layout_path(root, layout, "run_root", run_id)
-    sim_run_root = resolve_layout_path(root, layout, "sim_run_root", run_id)
-    provenance_root = resolve_layout_path(root, layout, "provenance_root", run_id)
-    controlled_code_root = provenance_root / "controlled-source"
+    run_root = root / _format_layout_path(layout, "run_root", run_id)
+    sim_run_root = root / _format_layout_path(layout, "sim_run_root", run_id)
+    provenance_root = root / _format_layout_path(layout, "provenance_root", run_id)
     log_root = provenance_root / "logs"
     log_root.mkdir(parents=True, exist_ok=True)
 
@@ -225,17 +223,15 @@ def run_synthetic_simulation(
         stage.get("working_directory"), "stages.run_simulation.working_directory"
     )
     working_directory = _working_directory(
-        root, sim_run_root, controlled_code_root, working_directory_key
+        root, sim_run_root, controlled_root, working_directory_key
     )
     argv = _command_argv(command, working_directory, sim_run_root)
 
     stdout_log = log_root / "run_simulation.stdout.log"
     stderr_log = log_root / "run_simulation.stderr.log"
     env = os.environ.copy()
-    env["CONTROLLED_SOURCE_REPO"] = controlled_code_root.as_posix()
-    env["SYNTHETIC_SIM_ENGINE"] = (
-        controlled_code_root / "scripts/synthetic_sim_engine.sh"
-    ).as_posix()
+    env["CONTROLLED_SOURCE_REPO"] = controlled_root.as_posix()
+    env["SYNTHETIC_SIM_ENGINE"] = (controlled_root / "scripts/synthetic_sim_engine.sh").as_posix()
     scheduler = _mapping(config.get("scheduler"), "scheduler")
     runtime_delay = _mapping(scheduler.get("runtime_delay"), "scheduler.runtime_delay")
     env["SYNTHETIC_SIM_RUN_ID"] = run_id
@@ -351,18 +347,12 @@ def configured_harness_make_targets(config_path: Path | str) -> tuple[str, ...]:
     config = _read_yaml_mapping(Path(config_path))
     scheduler = _mapping(config.get("scheduler"), "scheduler")
     payload_stage = _non_empty_string(scheduler.get("payload_stage"), "scheduler.payload_stage")
-    approved_targets = set(
-        _string_list(config.get("approved_make_targets"), "approved_make_targets")
-    )
     targets: list[str] = []
     for stage in _ordered_config_stages(config):
         stage_name = _non_empty_string(stage.get("name"), "stages[].name")
         if stage_name == payload_stage:
             continue
-        target = _harness_make_target(stage)
-        if target not in approved_targets:
-            raise ValueError(f"stage {stage_name} uses unapproved Make target: {target}")
-        targets.append(target)
+        targets.append(_harness_make_target(stage))
     return tuple(targets)
 
 
@@ -378,16 +368,14 @@ def _run_configured_stage(
         raise ValueError("run_id must be non-empty")
 
     root = workspace_root.expanduser().resolve()
+    controlled_root = controlled_source_repo.expanduser().resolve()
     config = _read_yaml_mapping(config_path)
     layout = _mapping(config.get("layout"), "layout")
     stage = _stage_by_name(config, stage_name)
-    run_root = resolve_layout_path(root, layout, "run_root", run_id)
-    sim_run_root = resolve_layout_path(root, layout, "sim_run_root", run_id)
-    provenance_root = resolve_layout_path(root, layout, "provenance_root", run_id)
-    _require_scheduler_receipt_for_extraction(
-        config_path, run_id, root, provenance_root, stage_name
-    )
-    controlled_code_root = provenance_root / "controlled-source"
+    run_root = root / _format_layout_path(layout, "run_root", run_id)
+    _require_scheduler_done_for_extraction(config, root, run_root, stage_name)
+    sim_run_root = root / _format_layout_path(layout, "sim_run_root", run_id)
+    provenance_root = root / _format_layout_path(layout, "provenance_root", run_id)
     log_root = provenance_root / "logs"
     log_root.mkdir(parents=True, exist_ok=True)
 
@@ -395,15 +383,10 @@ def _run_configured_stage(
     working_directory = _working_directory(
         root,
         sim_run_root,
-        controlled_code_root,
+        controlled_root,
         _non_empty_string(stage.get("working_directory"), f"stages.{stage_name}.working_directory"),
     )
-    argv = _stage_command_argv(command, stage, working_directory, run_root, controlled_code_root)
-    verify_materialization_evidence(
-        provenance_root / "inventories" / "materialized_runtime_scripts.json",
-        workspace_root=root,
-        controlled_source_repo=controlled_source_repo,
-    )
+    argv = _stage_command_argv(command, stage, working_directory, run_root, controlled_root)
 
     stdout_log = log_root / f"{stage_name}.stdout.log"
     stderr_log = log_root / f"{stage_name}.stderr.log"
@@ -479,72 +462,31 @@ def _harness_make_target(stage: dict[str, Any]) -> str:
     return stage_name.replace("_", "-")
 
 
-def _require_scheduler_receipt_for_extraction(
-    config_path: Path,
-    run_id: str,
-    root: Path,
-    provenance_root: Path,
-    stage_name: str,
+def _require_scheduler_done_for_extraction(
+    config: dict[str, Any], root: Path, run_root: Path, stage_name: str
 ) -> None:
     if stage_name not in {"extract_required", "extract_ad_hoc"}:
         return
-    # Local import avoids a module cycle: scheduler execution calls stage helpers.
-    from provenance.scheduler import validate_scheduler_receipt
-
-    receipt_path = resolve_root_relative_path(
-        provenance_root,
-        "validations/scheduler_receipt.json",
-        field_name="scheduler receipt validation evidence path",
-    )
-    try:
-        receipt = validate_scheduler_receipt(
-            config_path=config_path,
-            run_id=run_id,
-            workspace_root=root,
+    scheduler = _mapping(config.get("scheduler"), "scheduler")
+    state_path = run_root / "provenance" / "scheduler" / "job-state.json"
+    if not state_path.is_file():
+        raise ValueError(
+            f"{stage_name} requires terminal scheduler DONE before extraction; "
+            f"scheduler state evidence is missing: {_display_path(root, state_path)}"
         )
-    except Exception as error:
-        failure_receipt = {
-            "status": "fail",
-            "validated_at": _format_timestamp(_utc_now()),
-            "run_id": run_id,
-            "stage": stage_name,
-            "errors": [f"scheduler receipt validation raised {type(error).__name__}: {error}"],
-        }
-        try:
-            _write_scheduler_receipt_evidence(receipt_path, failure_receipt)
-        except OSError as evidence_error:
-            error.add_note(
-                "failed to persist scheduler receipt validation evidence at "
-                f"{_display_path(root, receipt_path)}: {evidence_error}"
-            )
-        raise
-
-    gate_error: ValueError | None = None
-    if receipt.get("status") != "pass":
-        errors = receipt.get("errors")
-        details = (
-            "; ".join(str(error) for error in errors) if isinstance(errors, list) else "unknown"
+    loaded = json.loads(state_path.read_text(encoding="utf-8"))
+    if not isinstance(loaded, dict):
+        raise ValueError(
+            f"scheduler state evidence must be a mapping: {_display_path(root, state_path)}"
         )
-        gate_error = ValueError(
-            f"{stage_name} requires a passed scheduler receipt before extraction: {details}; "
-            f"evidence: {_display_path(root, receipt_path)}"
+    if loaded.get("state") != "DONE":
+        raise ValueError(
+            f"{stage_name} requires terminal scheduler DONE before extraction; "
+            f"observed scheduler state {loaded.get('state')!r} in {_display_path(root, state_path)}"
         )
-    try:
-        _write_scheduler_receipt_evidence(receipt_path, receipt)
-    except OSError as evidence_error:
-        if gate_error is None:
-            raise
-        gate_error.add_note(
-            "failed to persist scheduler receipt validation evidence at "
-            f"{_display_path(root, receipt_path)}: {evidence_error}"
-        )
-    if gate_error is not None:
-        raise gate_error
-
-
-def _write_scheduler_receipt_evidence(path: Path, receipt: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    payload_stage = _non_empty_string(scheduler.get("payload_stage"), "scheduler.payload_stage")
+    if payload_stage != "run_simulation":
+        raise ValueError("scheduler.payload_stage must be run_simulation for extraction gating")
 
 
 def _display_path(root: Path, path: Path) -> str:
@@ -698,6 +640,13 @@ def _working_directory(
     if working_directory == "controlled_source_repo":
         return controlled_root
     raise ValueError(f"unknown stage working_directory: {working_directory}")
+
+
+def _format_layout_path(layout: dict[str, Any], key: str, run_id: str) -> Path:
+    value = layout.get(key)
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"layout.{key} must be a non-empty string")
+    return Path(value.format(run_id=run_id))
 
 
 def _read_yaml_mapping(path: Path) -> dict[str, Any]:

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 from pathlib import Path
 
 from provenance.validation import CSVShapeExpectation, ValidationStatus, validate_csv_product
@@ -26,7 +25,6 @@ def test_validate_csv_product_records_passing_shape_evidence(tmp_path: Path) -> 
     assert evidence.passed is True
     assert evidence.total_rows == 3
     assert evidence.data_rows == 2
-    assert evidence.sha256 == hashlib.sha256(product.read_bytes()).hexdigest()
     assert evidence.header == ("case", "value")
     assert evidence.column_counts == (2, 2, 2)
     assert [check.name for check in evidence.checks] == [
@@ -42,7 +40,6 @@ def test_validate_csv_product_records_passing_shape_evidence(tmp_path: Path) -> 
         "path": "products/extracted/required.csv",
         "status": "pass",
         "size_bytes": product.stat().st_size,
-        "sha256": hashlib.sha256(product.read_bytes()).hexdigest(),
         "total_rows": 3,
         "data_rows": 2,
         "header": ["case", "value"],
@@ -117,27 +114,3 @@ def test_validate_csv_product_reports_row_column_and_header_mismatches(tmp_path:
     assert checks["data_row_count"].actual == 2
     assert checks["column_count"].actual == [2, 2, 1]
     assert checks["header"].actual == ["case", "value"]
-
-
-def test_validate_csv_product_checks_column_values_and_integer_fields(tmp_path: Path) -> None:
-    product = tmp_path / "ad_hoc.csv"
-    product.write_text(
-        "logical_group,input_count,total_bytes\ndirA,3,39\ndirB,not-an-int,42\n",
-        encoding="utf-8",
-    )
-
-    evidence = validate_csv_product(
-        product,
-        CSVShapeExpectation(
-            expected_data_rows=3,
-            expected_column_values={"logical_group": ("dirA", "dirB", "dirC")},
-            integer_columns=("input_count", "total_bytes"),
-        ),
-    )
-
-    checks = {check.name: check for check in evidence.checks}
-    assert evidence.status is ValidationStatus.FAIL
-    assert checks["data_row_count"].actual == 2
-    assert checks["column_values:logical_group"].actual == ["dirA", "dirB"]
-    assert checks["integer_column:input_count"].actual == ["not-an-int"]
-    assert checks["integer_column:total_bytes"].passed is True

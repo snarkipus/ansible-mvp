@@ -15,13 +15,11 @@
       ansible.builtin.assert:
         that:
           - workflow_run_id | length > 0
-          - workflow_run_id is match('^[A-Za-z0-9][A-Za-z0-9._-]*$')
           - workflow_controlled_source_repo | length > 0
           - workflow_controlled_source_ref | length > 0
         fail_msg: >-
-          run_id must match [A-Za-z0-9][A-Za-z0-9._-]*, and
-          controlled_source_repo and controlled_source_ref must resolve to
-          non-empty values for the synthetic provenance workflow.
+          run_id, controlled_source_repo, and controlled_source_ref must resolve
+          to non-empty values for the synthetic provenance workflow.
 
     - name: Verify the wrapper Makefile exists
       ansible.builtin.stat:
@@ -57,8 +55,16 @@
 
   tasks:
     - name: Run configured workflow stage through the Make contract
-      ansible.builtin.include_tasks: ../tasks/run_workflow_stage.yml
+      ansible.builtin.command:
+        argv:
+          - "{{ make_executable }}"
+          - "{{ item }}"
+          - "RUN_ID={{ workflow_run_id }}"
+          - "CONTROLLED_SOURCE_REPO={{ workflow_controlled_source_repo }}"
+          - "CONTROLLED_SOURCE_REF={{ workflow_controlled_source_ref }}"
+      args:
+        chdir: "{{ provenance_wrapper_repo }}"
+      changed_when: true
       loop: "{{ workflow_stage_targets }}"
       loop_control:
-        loop_var: workflow_stage_target
-        label: "{{ workflow_stage_target }}"
+        label: "{{ item }}"

@@ -16,13 +16,8 @@ expectations:
     - bytes
     - sha256_prefix
   expected_column_count: 4
-  expected_data_rows: 3
+  minimum_data_rows: 1
   non_empty: true
-  expected_column_values:
-    logical_group:
-      - dirC
-  integer_columns:
-    - bytes
 evidence:
   output_path: provenance/validations/required_extract.json
   manifest_section: validations

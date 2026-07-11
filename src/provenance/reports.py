@@ -3,23 +3,17 @@
 from __future__ import annotations
 
 import csv
-import hashlib
-import io
-import json
-import os
 import struct
-import tempfile
 import zlib
 from importlib import import_module
 from pathlib import Path
 from typing import Any
 
-from openpyxl import Workbook, load_workbook
+from openpyxl import Workbook
 from openpyxl.worksheet.worksheet import Worksheet
 
 from provenance.hashing import hash_artifact
 from provenance.inventory import InventoryRecord, inventory_files, with_sha256
-from provenance.paths import validate_run_id
 
 REPORT_FILENAMES = ("summary.xlsx", "chart.png", "briefing.pptx")
 RgbColor = tuple[int, int, int]
@@ -39,7 +33,8 @@ def build_report_products(
     derived-product inventory records.
     """
 
-    validate_run_id(run_id)
+    if not run_id:
+        raise ValueError("run_id must be non-empty")
 
     root = Path(workspace_root).expanduser().resolve()
     provenance_root = root / "runs" / run_id / "provenance"
@@ -49,30 +44,12 @@ def build_report_products(
     reports_root = provenance_root / "products" / "reports"
     reports_root.mkdir(parents=True, exist_ok=True)
 
-    required_bytes = _require_bound_report_input_validation(
-        provenance_root, "required_extract", required_path
-    )
-    ad_hoc_bytes = _require_bound_report_input_validation(
-        provenance_root, "ad_hoc_extract", ad_hoc_path
-    )
+    required_rows = _read_csv(required_path)
+    ad_hoc_rows = _read_csv(ad_hoc_path)
 
-    required_rows = _read_csv(required_bytes)
-    ad_hoc_rows = _read_csv(ad_hoc_bytes)
-
-    final_paths = {name: reports_root / name for name in REPORT_FILENAMES}
-    temporary_paths = {
-        name: _temporary_report_path(reports_root, Path(name).suffix) for name in REPORT_FILENAMES
-    }
-    try:
-        _write_summary_workbook(temporary_paths["summary.xlsx"], required_rows, ad_hoc_rows)
-        _write_chart(temporary_paths["chart.png"], ad_hoc_rows)
-        _write_briefing(temporary_paths["briefing.pptx"], run_id, required_rows, ad_hoc_rows)
-        _validate_report_products(temporary_paths)
-        for name in REPORT_FILENAMES:
-            temporary_paths[name].replace(final_paths[name])
-    finally:
-        for path in temporary_paths.values():
-            path.unlink(missing_ok=True)
+    _write_summary_workbook(reports_root / "summary.xlsx", required_rows, ad_hoc_rows)
+    _write_chart(reports_root / "chart.png", ad_hoc_rows)
+    _write_briefing(reports_root / "briefing.pptx", run_id, required_rows, ad_hoc_rows)
 
     records = inventory_files(reports_root)
     return tuple(
@@ -91,48 +68,6 @@ def build_report_product_evidence(
     return tuple(_report_evidence(record) for record in records)
 
 
-def _temporary_report_path(root: Path, suffix: str) -> Path:
-    descriptor, name = tempfile.mkstemp(prefix=".report.", suffix=suffix, dir=root)
-    os.close(descriptor)
-    return Path(name)
-
-
-def _require_bound_report_input_validation(
-    provenance_root: Path, name: str, product_path: Path
-) -> bytes:
-    receipt_path = provenance_root / "validations" / f"{name}.json"
-    if not receipt_path.is_file():
-        raise ValueError(f"report generation requires passed validation evidence: {receipt_path}")
-    loaded = json.loads(receipt_path.read_text(encoding="utf-8"))
-    if not isinstance(loaded, dict) or loaded.get("status") != "pass":
-        raise ValueError(f"report generation requires passed {name} validation: {receipt_path}")
-
-    expected_path = product_path.relative_to(provenance_root).as_posix()
-    if loaded.get("path") != expected_path:
-        raise ValueError(
-            f"report generation rejected {name} validation with product path "
-            f"{loaded.get('path')!r}; expected {expected_path!r}: {receipt_path}"
-        )
-    product_bytes = product_path.read_bytes()
-    actual_size = len(product_bytes)
-    actual_sha256 = hashlib.sha256(product_bytes).hexdigest()
-    if loaded.get("size_bytes") != actual_size or loaded.get("sha256") != actual_sha256:
-        raise ValueError(
-            f"report generation rejected stale {name} validation: current CSV size/SHA-256 "
-            f"does not match {receipt_path}; revalidate {product_path} before building reports"
-        )
-    return product_bytes
-
-
-def _validate_report_products(paths: dict[str, Path]) -> None:
-    workbook = load_workbook(paths["summary.xlsx"], read_only=True)
-    workbook.close()
-    if paths["chart.png"].read_bytes()[:8] != b"\x89PNG\r\n\x1a\n":
-        raise ValueError("generated chart is not a valid PNG")
-    presentation_class = getattr(import_module("pptx"), "Presentation")
-    presentation_class(paths["briefing.pptx"])
-
-
 def _resolve_product_path(path: Path | str | None, default: Path) -> Path:
     candidate = default if path is None else Path(path)
     candidate = candidate.expanduser().resolve()
@@ -141,8 +76,9 @@ def _resolve_product_path(path: Path | str | None, default: Path) -> Path:
     return candidate
 
 
-def _read_csv(product_bytes: bytes) -> list[dict[str, str]]:
-    return list(csv.DictReader(io.StringIO(product_bytes.decode("utf-8"), newline="")))
+def _read_csv(path: Path) -> list[dict[str, str]]:
+    with path.open(newline="", encoding="utf-8") as file_obj:
+        return list(csv.DictReader(file_obj))
 
 
 def _write_summary_workbook(

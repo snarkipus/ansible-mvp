@@ -1,22 +1,17 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import shutil
 import subprocess
-from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
 import pytest
 import yaml
 
-from provenance.cli import main
-from provenance.manifest import semantic_consistency_errors
-
 ROOT = Path(__file__).resolve().parents[1]
-CONTROLLED_REF = "controlled-source-demo-v0.1.2"
+CONTROLLED_REF = "controlled-source-demo-v0.1.1"
 
 
 def test_clean_synthetic_workflow_smoke_generates_manifest_reports_and_validation(
@@ -88,31 +83,18 @@ def test_clean_synthetic_workflow_smoke_generates_manifest_reports_and_validatio
     )
     assert manifest["scheduler"]["terminal_job_state"]["state"] == "DONE"
     assert manifest["scheduler"]["accounting"]["state"] == "DONE"
-    assert manifest["scheduler"]["receipt_validation"]["status"] == "pass"
-    assert manifest["repositories"][0]["factory_definition"]
-    assert manifest["repositories"][1]["selected_artifacts"]
     assert manifest["raw_simulation_outputs"][0]["relative_path"] == "lists/dirC/sim-out.dat"
     assert manifest["raw_simulation_outputs"][0]["sim_area"] == "lists"
     assert manifest["raw_simulation_outputs"][0]["logical_group"] == "dirC"
     report_names = {Path(record["relative_path"]).name for record in manifest["derived_products"]}
     assert {"summary.xlsx", "chart.png", "briefing.pptx"}.issubset(report_names)
-    validation_paths = {record.get("path") for record in manifest["validations"]}
-    assert {
-        "products/extracted/required.csv",
-        "products/extracted/ad_hoc.csv",
-    }.issubset(validation_paths)
+    assert any(record["status"] == "pass" for record in manifest["validations"])
     assert yaml.safe_load(required_validation.read_text(encoding="utf-8"))["status"] == "pass"
-    assert manifest["hash_policy"]["assurance"]["preservation"].startswith("not implemented")
     configured_stages = _load_run_config(wrapper)["stages"]
-    pre_assembly_stages = [
-        stage for stage in configured_stages if stage["name"] not in {"manifest", "manifest_smoke"}
-    ]
-    configured_stage_names = [stage["name"] for stage in pre_assembly_stages]
+    configured_stage_names = [stage["name"] for stage in configured_stages]
     manifest_stage_names = [stage["name"] for stage in manifest["stages"]]
     assert manifest_stage_names == configured_stage_names
-    for configured_stage, manifest_stage in zip(
-        pre_assembly_stages, manifest["stages"], strict=True
-    ):
+    for configured_stage, manifest_stage in zip(configured_stages, manifest["stages"], strict=True):
         assert manifest_stage["display_name"] == configured_stage["display_name"]
         assert manifest_stage["lifecycle_class"] == configured_stage["lifecycle_class"]
         assert manifest_stage["display_order"] == configured_stage["display_order"]
@@ -151,300 +133,6 @@ def test_clean_synthetic_workflow_smoke_generates_manifest_reports_and_validatio
         assert evidence["return_code"] == 0
         assert "inputs" in evidence
         assert "outputs" in evidence
-    manifest_bytes = manifest_path.read_bytes()
-    manifest_sha256 = hashlib.sha256(manifest_bytes).hexdigest()
-    assembly_receipt = json.loads(
-        (provenance_root / "logs" / "manifest.stage.json").read_text(encoding="utf-8")
-    )
-    smoke_receipt = json.loads(
-        (provenance_root / "validations" / "manifest_smoke.json").read_text(encoding="utf-8")
-    )
-    assert assembly_receipt["manifest_sha256"] == manifest_sha256
-    assert smoke_receipt["manifest_sha256"] == manifest_sha256
-    assert smoke_receipt["manifest_hash_matches_assembly_receipt"] is True
-    assert smoke_receipt["semantic_errors"] == []
-    assert manifest_sha256 not in manifest_path.read_text(encoding="utf-8")
-    assert {stage["name"] for stage in manifest["stages"]}.isdisjoint(
-        {"manifest", "manifest_smoke"}
-    )
-    assert all(
-        validation.get("evidence_path")
-        != f"runs/{run_id}/provenance/validations/manifest_smoke.json"
-        for validation in manifest["validations"]
-    )
-
-    def assert_semantic_error(mutated: dict[str, Any], expected: str) -> None:
-        errors = semantic_consistency_errors(
-            mutated,
-            config_path=wrapper / "configs" / "run.synthetic.yaml",
-            workspace_root=wrapper,
-        )
-        assert any(expected in error for error in errors), errors
-
-    duplicate_stage = deepcopy(manifest)
-    duplicate_stage["stages"].append(deepcopy(duplicate_stage["stages"][0]))
-    assert_semantic_error(duplicate_stage, "duplicate names")
-
-    out_of_order = deepcopy(manifest)
-    out_of_order["stages"][0], out_of_order["stages"][1] = (
-        out_of_order["stages"][1],
-        out_of_order["stages"][0],
-    )
-    assert_semantic_error(out_of_order, "configured pre-assembly order")
-
-    failed_stage = deepcopy(manifest)
-    failed_stage["stages"][0]["status"] = "fail"
-    assert_semantic_error(failed_stage, "must pass with zero return_code")
-
-    artifact_hash_mismatch = deepcopy(manifest)
-    artifact_hash_mismatch["derived_products"][0]["sha256"] = "0" * 64
-    assert_semantic_error(artifact_hash_mismatch, "SHA-256 does not match on-disk bytes")
-
-    source_mismatch = deepcopy(manifest)
-    source_mismatch["inputs"][0]["materialization"]["source_resolved_commit"] = "0" * 40
-    assert_semantic_error(source_mismatch, "selected-source identity")
-
-    producer_mismatch = deepcopy(manifest)
-    producer_mismatch["derived_products"][0]["producing_stage"] = "unknown_stage"
-    assert_semantic_error(producer_mismatch, "does not declare output")
-
-    failed_validation = deepcopy(manifest)
-    next(
-        validation
-        for validation in failed_validation["validations"]
-        if validation.get("path") == "products/extracted/required.csv"
-    )["status"] = "fail"
-    assert_semantic_error(failed_validation, "missing or not successful")
-
-    commit_disagreement = deepcopy(manifest)
-    commit_disagreement["repositories"][1]["selected_artifacts"][0]["selected_commit"] = "0" * 40
-    assert_semantic_error(commit_disagreement, "selected commit does not match repository identity")
-
-    validation_product_disagreement = deepcopy(manifest)
-    validation_product_disagreement["validations"][0]["product_sha256"] = "0" * 64
-    assert_semantic_error(validation_product_disagreement, "validated product SHA-256")
-
-    validation_size_disagreement = deepcopy(manifest)
-    validation_size_disagreement["validations"][0]["size_bytes"] += 1
-    assert_semantic_error(validation_size_disagreement, "validated product size")
-
-    jointly_forged_size = deepcopy(manifest)
-    forged_validation = next(
-        validation
-        for validation in jointly_forged_size["validations"]
-        if validation.get("path") == "products/extracted/required.csv"
-    )
-    forged_product_record = next(
-        product
-        for product in jointly_forged_size["derived_products"]
-        if product.get("relative_path") == "products/extracted/required.csv"
-    )
-    forged_validation["size_bytes"] += 1
-    forged_product_record["size_bytes"] += 1
-    assert_semantic_error(jointly_forged_size, "size_bytes does not match on-disk artifact")
-
-    configured_validation = next(
-        validation
-        for validation in manifest["validations"]
-        if validation.get("path") == "products/extracted/required.csv"
-    )
-    wrong_evidence_path = deepcopy(manifest)
-    next(
-        validation
-        for validation in wrong_evidence_path["validations"]
-        if validation.get("path") == "products/extracted/required.csv"
-    )["evidence_path"] = f"runs/{run_id}/provenance/validations/renamed.json"
-    assert_semantic_error(wrong_evidence_path, "declared evidence_path")
-
-    missing_configured_receipt = deepcopy(manifest)
-    missing_configured_receipt["validations"].remove(
-        next(
-            validation
-            for validation in missing_configured_receipt["validations"]
-            if validation.get("path") == "products/extracted/required.csv"
-        )
-    )
-    assert_semantic_error(missing_configured_receipt, "declared evidence_path")
-
-    duplicate_configured_receipt = deepcopy(manifest)
-    duplicate_configured_receipt["validations"].append(deepcopy(configured_validation))
-    assert_semantic_error(duplicate_configured_receipt, "found 2")
-
-    required_product_path = "products/extracted/required.csv"
-    missing_product_record = deepcopy(manifest)
-    missing_product_record["derived_products"] = [
-        product
-        for product in missing_product_record["derived_products"]
-        if product.get("relative_path") != required_product_path
-    ]
-    assert_semantic_error(
-        missing_product_record, "must map to exactly one derived product; found 0"
-    )
-
-    duplicate_product_record = deepcopy(manifest)
-    required_product = next(
-        product
-        for product in duplicate_product_record["derived_products"]
-        if product.get("relative_path") == required_product_path
-    )
-    duplicate_product_record["derived_products"].append(deepcopy(required_product))
-    assert_semantic_error(
-        duplicate_product_record, "must map to exactly one derived product; found 2"
-    )
-
-    required_product_file = wrapper / required_product["run_relative_path"]
-    temporarily_missing = required_product_file.with_suffix(".temporarily-missing")
-    required_product_file.rename(temporarily_missing)
-    try:
-        assert_semantic_error(manifest, "derived product file is missing")
-    finally:
-        temporarily_missing.rename(required_product_file)
-
-    scheduler_mismatch = deepcopy(manifest)
-    scheduler_mismatch["scheduler"]["terminal_job_state"]["receipt_id"] = "wrong-receipt"
-    assert_semantic_error(scheduler_mismatch, "terminal_job_state identity is inconsistent")
-
-    # Reuse this completed workflow for the full post-receipt mutation matrix.
-    scheduler_root = provenance_root / "scheduler"
-    mutation_cases = (
-        (scheduler_root / "submission.yaml", "receipt_id", "wrong", "does not match submission"),
-        (scheduler_root / "job-state.json", "job_id", "wrong", "job_state job_id"),
-        (scheduler_root / "terminal-state.json", "state", "EXIT", "terminal state must be DONE"),
-        (scheduler_root / "accounting.yaml", "receipt_id", "wrong", "accounting receipt_id"),
-        (
-            provenance_root / "logs" / "run_simulation.stage.json",
-            "status",
-            "fail",
-            "payload stage evidence must pass",
-        ),
-        (
-            scheduler_root / "accounting.yaml",
-            "finished_at",
-            "1900-01-01T00:00:00+00:00",
-            "finished_at values do not agree",
-        ),
-    )
-    smoke_args = [
-        "smoke-manifest",
-        str(manifest_path),
-        "--config",
-        str(wrapper / "configs" / "run.synthetic.yaml"),
-        "--output",
-        str(provenance_root / "validations" / "manifest_smoke.json"),
-        "--run-id",
-        run_id,
-        "--workspace-root",
-        str(wrapper),
-        "--controlled-source-repo",
-        str(wrapper.parent / "controlled-source-demo"),
-        "--controlled-source-ref",
-        CONTROLLED_REF,
-        "--stage-output",
-        str(provenance_root / "logs" / "manifest_smoke.stage.json"),
-    ]
-    for evidence_path, field, value, expected_error in mutation_cases:
-        original_evidence = evidence_path.read_bytes()
-        loaded = yaml.safe_load(original_evidence)
-        loaded[field] = value
-        evidence_path.write_text(
-            json.dumps(loaded) if evidence_path.suffix == ".json" else yaml.safe_dump(loaded),
-            encoding="utf-8",
-        )
-        assert main(smoke_args) == 1
-        failed_smoke = json.loads(
-            (provenance_root / "validations" / "manifest_smoke.json").read_text(encoding="utf-8")
-        )
-        assert any(expected_error in error for error in failed_smoke["semantic_errors"]), (
-            evidence_path,
-            failed_smoke,
-        )
-        assert manifest_path.read_bytes() == manifest_bytes
-        failed_stage_receipt = json.loads(
-            (provenance_root / "logs" / "manifest_smoke.stage.json").read_text(encoding="utf-8")
-        )
-        assert failed_stage_receipt["status"] == "fail"
-        evidence_path.write_bytes(original_evidence)
-
-    raw_output_path = sim_root / manifest["raw_simulation_outputs"][0]["relative_path"]
-    original_raw_output = raw_output_path.read_bytes()
-    raw_output_path.write_bytes(original_raw_output + b"tampered\n")
-    assert main(smoke_args) == 1
-    failed_smoke = json.loads(
-        (provenance_root / "validations" / "manifest_smoke.json").read_text(encoding="utf-8")
-    )
-    assert any("raw output hash" in error for error in failed_smoke["semantic_errors"])
-    assert manifest_path.read_bytes() == manifest_bytes
-    assert (
-        json.loads(
-            (provenance_root / "logs" / "manifest_smoke.stage.json").read_text(encoding="utf-8")
-        )["status"]
-        == "fail"
-    )
-    raw_output_path.write_bytes(original_raw_output)
-
-    validation_receipt_path = provenance_root / "validations" / "required_extract.json"
-    original_validation_receipt = validation_receipt_path.read_bytes()
-    receipt = json.loads(original_validation_receipt)
-    receipt["sha256"] = "0" * 64
-    validation_receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
-    assert main(smoke_args) == 1
-    failed_smoke = json.loads(
-        (provenance_root / "validations" / "manifest_smoke.json").read_text(encoding="utf-8")
-    )
-    assert any(
-        "validations" in error and "SHA-256" in error for error in failed_smoke["semantic_errors"]
-    )
-    assert manifest_path.read_bytes() == manifest_bytes
-    validation_receipt_path.write_bytes(original_validation_receipt)
-
-    renamed_validation_receipt = validation_receipt_path.with_name("required_extract.renamed.json")
-    validation_receipt_path.rename(renamed_validation_receipt)
-    try:
-        assert main(smoke_args) == 1
-        failed_smoke = json.loads(
-            (provenance_root / "validations" / "manifest_smoke.json").read_text(encoding="utf-8")
-        )
-        assert any("artifact is missing" in error for error in failed_smoke["semantic_errors"])
-        assert manifest_path.read_bytes() == manifest_bytes
-    finally:
-        renamed_validation_receipt.rename(validation_receipt_path)
-
-    validated_product = provenance_root / "products" / "extracted" / "required.csv"
-    original_product = validated_product.read_bytes()
-    validated_product.write_bytes(original_product + b"tampered\n")
-    assert main(smoke_args) == 1
-    failed_smoke = json.loads(
-        (provenance_root / "validations" / "manifest_smoke.json").read_text(encoding="utf-8")
-    )
-    assert any(
-        "derived_products" in error and "SHA-256" in error
-        for error in failed_smoke["semantic_errors"]
-    )
-    assert manifest_path.read_bytes() == manifest_bytes
-    validated_product.write_bytes(original_product)
-
-    # Forging both product bindings in the receipt cannot hide current product bytes.
-    forged_product = original_product + b"jointly-forged\n"
-    validated_product.write_bytes(forged_product)
-    forged_receipt = json.loads(original_validation_receipt)
-    forged_receipt["sha256"] = hashlib.sha256(forged_product).hexdigest()
-    forged_receipt["size_bytes"] = len(forged_product)
-    validation_receipt_path.write_text(json.dumps(forged_receipt), encoding="utf-8")
-    assert main(smoke_args) == 1
-    failed_smoke = json.loads(
-        (provenance_root / "validations" / "manifest_smoke.json").read_text(encoding="utf-8")
-    )
-    assert any("derived_products" in error for error in failed_smoke["semantic_errors"])
-    assert manifest_path.read_bytes() == manifest_bytes
-    validation_receipt_path.write_bytes(original_validation_receipt)
-    validated_product.write_bytes(original_product)
-
-    # Finalization receipts remain external even after repeated failures.
-    assert manifest_path.read_bytes() == manifest_bytes
-    assert manifest_sha256 not in manifest_path.read_text(encoding="utf-8")
-    assert {stage["name"] for stage in manifest["stages"]}.isdisjoint(
-        {"manifest", "manifest_smoke"}
-    )
 
 
 def test_preflight_smoke_rejects_dirty_controlled_source(tmp_path: Path) -> None:
@@ -456,43 +144,6 @@ def test_preflight_smoke_rejects_dirty_controlled_source(tmp_path: Path) -> None
 
     assert result.returncode != 0
     assert "controlled source repository is dirty" in _combined_output(result)
-
-
-def test_bootstrap_creates_v012_without_moving_older_tag(tmp_path: Path) -> None:
-    wrapper = _prepare_wrapper_checkout(tmp_path)
-    controlled = wrapper.parent / "controlled-source-demo"
-    controlled.mkdir()
-    _run(["git", "init"], cwd=controlled)
-    (controlled / "README.md").write_text("old contract\n", encoding="utf-8")
-    _run(["git", "add", "README.md"], cwd=controlled)
-    _run(
-        [
-            "git",
-            "-c",
-            "user.name=Test",
-            "-c",
-            "user.email=test@example.invalid",
-            "commit",
-            "-m",
-            "old contract",
-        ],
-        cwd=controlled,
-    )
-    _run(["git", "tag", "controlled-source-demo-v0.1.1"], cwd=controlled)
-    old_commit = _run(
-        ["git", "rev-parse", "controlled-source-demo-v0.1.1"], cwd=controlled
-    ).stdout.strip()
-
-    _run(["make", "bootstrap-controlled-source"], cwd=wrapper)
-
-    assert (
-        _run(["git", "rev-parse", "controlled-source-demo-v0.1.1"], cwd=controlled).stdout.strip()
-        == old_commit
-    )
-    assert (
-        _run(["git", "rev-parse", CONTROLLED_REF], cwd=controlled).stdout.strip()
-        == _run(["git", "rev-parse", "HEAD"], cwd=controlled).stdout.strip()
-    )
 
 
 def test_preflight_rejects_existing_run_id_unless_reuse_policy_is_explicit(
@@ -509,31 +160,6 @@ def test_preflight_rejects_existing_run_id_unless_reuse_policy_is_explicit(
     assert rejected.returncode != 0
     assert "run root already exists" in _combined_output(rejected)
     assert reused.returncode == 0
-
-
-def test_ansible_rejects_unsafe_run_id_before_make_or_workspace_creation(tmp_path: Path) -> None:
-    wrapper = _prepare_wrapper_checkout(tmp_path)
-
-    result = _run(
-        [
-            "ansible-playbook",
-            "ansible/playbooks/run_synthetic_workflow.yml",
-            "-i",
-            "ansible/inventory/localhost.ini",
-            "-e",
-            "run_id=../escape",
-            "-e",
-            "controlled_source_repo=../controlled-source-demo",
-            "-e",
-            f"controlled_source_ref={CONTROLLED_REF}",
-        ],
-        cwd=wrapper,
-        check=False,
-    )
-
-    assert result.returncode != 0
-    assert "run_id must match" in _combined_output(result)
-    assert not (wrapper.parent / "escape").exists()
 
 
 def test_preflight_smoke_rejects_dirty_wrapper_controlled_path(tmp_path: Path) -> None:
@@ -624,8 +250,8 @@ def test_extract_required_smoke_rejects_non_done_scheduler_state(tmp_path: Path)
     )
 
     assert result.returncode != 0
-    assert "requires a passed scheduler receipt" in _combined_output(result)
-    assert "submission" in _combined_output(result)
+    assert "requires terminal scheduler DONE" in _combined_output(result)
+    assert "'RUN'" in _combined_output(result)
 
 
 def test_copy_git_worktree_respects_gitignore(tmp_path: Path) -> None:

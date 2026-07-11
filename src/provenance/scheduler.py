@@ -11,7 +11,6 @@ import subprocess
 import sys
 import time
 import traceback
-import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -20,10 +19,7 @@ from typing import Any
 import yaml
 
 from provenance.config import read_config_mapping
-from provenance.hashing import sha256_file
-from provenance.paths import resolve_layout_path, validate_run_id
 from provenance.stages import run_synthetic_simulation
-from provenance.workspace import verify_materialization_evidence
 
 LSF_TOOL_NAMES: tuple[str, ...] = ("bsub", "bjobs", "bhist", "bacct")
 
@@ -50,13 +46,10 @@ def submit_mock_lsf_job(
     terminal_state_path = context["terminal_state_path"]
     terminal_state_path.unlink(missing_ok=True)
     submitted_at = _utc_now()
-    receipt_id = str(uuid.uuid4())
     initial_state = {
         "run_id": run_id,
         "scheduler": "mock_lsf",
-        "mode": context["scheduler"]["mode"],
         "job_id": context["job_id"],
-        "receipt_id": receipt_id,
         "state": "RUN",
         "pid": None,
         "process_group_id": None,
@@ -106,19 +99,13 @@ def submit_mock_lsf_job(
 
     payload = {
         "run_id": run_id,
-        "receipt_id": receipt_id,
-        "job_id": context["job_id"],
         "scheduler": "mock_lsf",
         "mode": context["scheduler"]["mode"],
         "emulator_execution_mode": context["scheduler"]["emulator_execution_mode"],
         "real_lsf_required": False,
         "real_lsf_tools": _tool_status(tool_resolver),
         "submission": {
-            "run_id": run_id,
-            "scheduler": "mock_lsf",
-            "mode": context["scheduler"]["mode"],
             "job_id": context["job_id"],
-            "receipt_id": receipt_id,
             "queue": "mock-local",
             "status": "submitted",
             "state": "RUN",
@@ -220,9 +207,7 @@ def collect_mock_lsf_accounting(
     accounting = {
         "run_id": run_id,
         "scheduler": "mock_lsf",
-        "mode": context["scheduler"]["mode"],
         "job_id": context["job_id"],
-        "receipt_id": state.get("receipt_id"),
         "state": state.get("state"),
         "exit_code": state.get("exit_code"),
         "queue": "mock-local",
@@ -230,7 +215,6 @@ def collect_mock_lsf_accounting(
         "started_at": started_at,
         "finished_at": finished_at,
         "elapsed_seconds": _elapsed_seconds(started_at, finished_at),
-        "accounted_at": _format_timestamp(_utc_now()),
         "source": "mock_lsf_emulator",
         "job_state_path": _relative(context["root"], context["state_path"]),
         "payload_stage_evidence": state.get("payload_stage_evidence"),
@@ -258,17 +242,6 @@ def run_mock_lsf_wrapper(
     state["started_at"] = _format_timestamp(started_at)
     _write_json(state_path, state)
     try:
-        inventories_root = context["provenance_root"] / "inventories"
-        verify_materialization_evidence(
-            inventories_root / "materialized_inputs.json",
-            workspace_root=context["root"],
-            controlled_source_repo=controlled_source_repo,
-        )
-        verify_materialization_evidence(
-            inventories_root / "materialized_runtime_scripts.json",
-            workspace_root=context["root"],
-            controlled_source_repo=controlled_source_repo,
-        )
         result = run_synthetic_simulation(
             config_path=config_path,
             run_id=run_id,
@@ -277,11 +250,6 @@ def run_mock_lsf_wrapper(
         )
         payload_evidence_path = context["root"] / context["payload_stage_evidence"]
         result_payload = result.to_dict()
-        result_payload["receipt_id"] = state.get("receipt_id")
-        result_payload["run_id"] = run_id
-        result_payload["job_id"] = context["job_id"]
-        result_payload["scheduler"] = "mock_lsf"
-        result_payload["mode"] = context["scheduler"]["mode"]
         result_payload["evidence_path"] = context["payload_stage_evidence"]
         _write_json(payload_evidence_path, result_payload)
         return_code = result.return_code
@@ -310,242 +278,6 @@ def run_mock_lsf_wrapper(
     return return_code
 
 
-def validate_scheduler_receipt(
-    *,
-    config_path: Path | str,
-    run_id: str,
-    workspace_root: Path | str = Path("."),
-) -> dict[str, Any]:
-    """Validate scheduler components as one coherent successful receipt."""
-
-    context = _scheduler_context(config_path, run_id, workspace_root)
-    component_paths = {
-        "submission": context["submission_path"],
-        "job_state": context["state_path"],
-        "terminal_state": context["terminal_state_path"],
-        "accounting": context["accounting_path"],
-        "payload": context["root"] / context["payload_stage_evidence"],
-    }
-    components: dict[str, dict[str, Any]] = {}
-    errors: list[str] = []
-    for name, path in component_paths.items():
-        try:
-            components[name] = (
-                _read_yaml_mapping(path)
-                if path.suffix in {".yaml", ".yml"}
-                else _read_json_mapping(path)
-            )
-        except ValueError as exc:
-            errors.append(f"{name}: {exc}")
-
-    if errors:
-        return _scheduler_receipt_result(context, components, errors)
-
-    submission = components["submission"]
-    state = components["job_state"]
-    terminal = components["terminal_state"]
-    accounting = components["accounting"]
-    payload = components["payload"]
-    receipt_id = submission.get("receipt_id")
-    if not isinstance(receipt_id, str) or not receipt_id:
-        errors.append("submission receipt_id is missing")
-    expected_job_id = context["job_id"]
-    identity_records = {
-        "submission": submission,
-        "job_state": state,
-        "terminal_state": terminal,
-        "accounting": accounting,
-        "payload": payload,
-    }
-    for name, component in identity_records.items():
-        if component.get("receipt_id") != receipt_id:
-            errors.append(f"{name} receipt_id does not match submission")
-        if component.get("run_id") != run_id:
-            errors.append(f"{name} run_id does not match {run_id!r}")
-        component_job_id = component.get("job_id")
-        if component_job_id != expected_job_id:
-            errors.append(f"{name} job_id does not match {expected_job_id!r}")
-        if component.get("scheduler") != "mock_lsf":
-            errors.append(f"{name} scheduler must be 'mock_lsf'")
-        if component.get("mode") != context["scheduler"]["mode"]:
-            errors.append(
-                f"{name} mode does not match configured scheduler mode "
-                f"{context['scheduler']['mode']!r}"
-            )
-
-    nested_submission = submission.get("submission")
-    if not isinstance(nested_submission, dict):
-        errors.append("submission.submission must be a mapping")
-        nested_submission = {}
-    for field, expected in (
-        ("run_id", run_id),
-        ("scheduler", "mock_lsf"),
-        ("mode", context["scheduler"]["mode"]),
-        ("job_id", expected_job_id),
-        ("receipt_id", receipt_id),
-    ):
-        if nested_submission.get(field) != expected:
-            errors.append(f"submission.submission.{field} does not match top-level identity")
-
-    scheduler_config = context["scheduler"]
-    payload_stage = scheduler_config.get("payload_stage")
-    payload_command = scheduler_config.get("payload_command")
-    configured_stages = context["config"].get("stages")
-    configured_payload = (
-        next(
-            (
-                stage
-                for stage in configured_stages
-                if isinstance(stage, dict) and stage.get("name") == payload_stage
-            ),
-            None,
-        )
-        if isinstance(configured_stages, list)
-        else None
-    )
-    if payload.get("name") != payload_stage:
-        errors.append("payload name does not match configured payload_stage")
-    if not isinstance(configured_payload, dict):
-        errors.append("configured payload_stage declaration is missing")
-    else:
-        if configured_payload.get("command") != payload_command:
-            errors.append(
-                "configured payload stage command does not match scheduler payload_command"
-            )
-        if configured_payload.get("command_kind") != scheduler_config.get("payload_command_kind"):
-            errors.append("configured payload stage command_kind does not match scheduler policy")
-    if payload.get("command") != payload_command:
-        errors.append("payload command does not match configured controlled payload command")
-    if nested_submission.get("payload_command") != payload_command:
-        errors.append(
-            "submission.submission.payload_command does not match configured payload command"
-        )
-
-    expected_links = {
-        "submission.metadata_path": (
-            submission.get("metadata_path"),
-            component_paths["submission"],
-        ),
-        "submission.job_state_path": (
-            submission.get("job_state_path"),
-            component_paths["job_state"],
-        ),
-        "submission.terminal_state_path": (
-            submission.get("terminal_state_path"),
-            component_paths["terminal_state"],
-        ),
-        "submission.accounting_path": (
-            submission.get("accounting_path"),
-            component_paths["accounting"],
-        ),
-        "job_state.payload_stage_evidence": (
-            state.get("payload_stage_evidence"),
-            component_paths["payload"],
-        ),
-        "terminal_state.payload_stage_evidence": (
-            terminal.get("payload_stage_evidence"),
-            component_paths["payload"],
-        ),
-        "accounting.job_state_path": (
-            accounting.get("job_state_path"),
-            component_paths["job_state"],
-        ),
-        "accounting.payload_stage_evidence": (
-            accounting.get("payload_stage_evidence"),
-            component_paths["payload"],
-        ),
-        "payload.evidence_path": (payload.get("evidence_path"), component_paths["payload"]),
-    }
-    for name, (actual, path) in expected_links.items():
-        expected = _relative(context["root"], path)
-        if actual != expected:
-            errors.append(f"{name} must link to {expected!r}, got {actual!r}")
-
-    if terminal.get("state") != "DONE" or terminal.get("exit_code") != 0:
-        errors.append("terminal state must be DONE with zero exit_code")
-    if state.get("state") != "DONE" or state.get("exit_code") != 0:
-        errors.append("normalized job state must be DONE with zero exit_code")
-    if accounting.get("state") != "DONE" or accounting.get("exit_code") != 0:
-        errors.append("accounting must record DONE with zero exit_code")
-    if payload.get("status") != "pass" or payload.get("return_code") != 0:
-        errors.append("payload stage evidence must pass with zero return_code")
-    timestamp_groups = [
-        (
-            "submitted_at",
-            [
-                submission.get("submission", {}).get("submitted_at_utc")
-                if isinstance(submission.get("submission"), dict)
-                else None,
-                state.get("submitted_at"),
-                terminal.get("submitted_at"),
-                accounting.get("submitted_at"),
-            ],
-        ),
-        (
-            "started_at",
-            [
-                state.get("started_at"),
-                terminal.get("started_at"),
-                accounting.get("started_at"),
-                payload.get("started_at"),
-            ],
-        ),
-        (
-            "finished_at",
-            [
-                state.get("finished_at"),
-                terminal.get("finished_at"),
-                accounting.get("finished_at"),
-                payload.get("finished_at"),
-            ],
-        ),
-        ("accounted_at", [accounting.get("accounted_at")]),
-    ]
-    timestamp_values: list[tuple[str, object]] = []
-    for name, values in timestamp_groups:
-        timestamp_values.append((name, values[0]))
-        if any(value != values[0] for value in values[1:]):
-            errors.append(f"duplicated {name} values do not agree: {values!r}")
-    parsed_timestamps: list[datetime] = []
-    for name, value in timestamp_values:
-        parsed = _parse_timestamp(value)
-        if parsed is None:
-            errors.append(f"{name} is missing or invalid")
-        else:
-            parsed_timestamps.append(parsed)
-    if len(parsed_timestamps) == len(timestamp_values) and parsed_timestamps != sorted(
-        parsed_timestamps
-    ):
-        errors.append("scheduler lifecycle timestamps are not monotonic")
-
-    config = context["config"]
-    layout = _mapping(config.get("layout"), "layout")
-    raw_relative = _non_empty_string(
-        layout.get("canonical_raw_output"), "layout.canonical_raw_output"
-    )
-    raw_display_path = f"sim-run-root/{raw_relative}"
-    raw_path = context["sim_run_root"] / raw_relative
-    payload_outputs_value = payload.get("outputs")
-    payload_outputs = payload_outputs_value if isinstance(payload_outputs_value, list) else []
-    output_records = [
-        item
-        for item in payload_outputs
-        if isinstance(item, dict) and item.get("relative_path") == raw_display_path
-    ]
-    output_record = output_records[0] if len(output_records) == 1 else None
-    if len(output_records) != 1:
-        errors.append(
-            f"payload output evidence must contain {raw_display_path} exactly once; "
-            f"found {len(output_records)} rows"
-        )
-    elif not raw_path.is_file():
-        errors.append(f"raw output is missing: {raw_display_path}")
-    elif output_record is not None and output_record.get("sha256") != sha256_file(raw_path):
-        errors.append(f"raw output hash does not match payload evidence: {raw_display_path}")
-
-    return _scheduler_receipt_result(context, components, errors)
-
-
 def write_mock_lsf_metadata(
     *,
     config_path: Path | str,
@@ -572,14 +304,15 @@ def write_mock_lsf_metadata(
 def _scheduler_context(
     config_path: Path | str, run_id: str, workspace_root: Path | str
 ) -> dict[str, Any]:
-    validate_run_id(run_id)
+    if not run_id:
+        raise ValueError("run_id must be non-empty")
     root = Path(workspace_root).expanduser().resolve()
     config = read_config_mapping(Path(config_path))
     layout = _mapping(config.get("layout"), "layout")
     scheduler = _mapping(config.get("scheduler"), "scheduler")
-    run_root = resolve_layout_path(root, layout, "run_root", run_id)
-    sim_run_root = resolve_layout_path(root, layout, "sim_run_root", run_id)
-    provenance_root = resolve_layout_path(root, layout, "provenance_root", run_id)
+    run_root = root / _format_layout_path(layout, "run_root", run_id)
+    sim_run_root = root / _format_layout_path(layout, "sim_run_root", run_id)
+    provenance_root = root / _format_layout_path(layout, "provenance_root", run_id)
     scheduler_root = provenance_root / "scheduler"
     scheduler_root.mkdir(parents=True, exist_ok=True)
     submission_path = run_root / _non_empty_string(
@@ -727,37 +460,11 @@ def _elapsed_seconds(started_at: object, finished_at: object) -> float | None:
     return round((finish - start).total_seconds(), 6)
 
 
-def _parse_timestamp(value: object) -> datetime | None:
-    if not isinstance(value, str):
-        return None
-    try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-        return parsed if parsed.utcoffset() is not None else None
-    except ValueError:
-        return None
-
-
-def _scheduler_receipt_result(
-    context: dict[str, Any],
-    components: dict[str, dict[str, Any]],
-    errors: list[str],
-) -> dict[str, Any]:
-    state = components.get("job_state", {})
-    return {
-        "status": "fail" if errors else "pass",
-        "validated_at": _format_timestamp(_utc_now()),
-        "run_id": context["run_root"].name,
-        "job_id": context["job_id"],
-        "receipt_id": state.get("receipt_id"),
-        "errors": errors,
-        "components": {
-            "submission": _relative(context["root"], context["submission_path"]),
-            "job_state": _relative(context["root"], context["state_path"]),
-            "terminal_state": _relative(context["root"], context["terminal_state_path"]),
-            "accounting": _relative(context["root"], context["accounting_path"]),
-            "payload": context["payload_stage_evidence"],
-        },
-    }
+def _format_layout_path(layout: dict[str, Any], key: str, run_id: str) -> Path:
+    value = layout.get(key)
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"layout.{key} must be a non-empty string")
+    return Path(value.format(run_id=run_id))
 
 
 def _mapping(value: object, name: str) -> dict[str, Any]:
@@ -802,18 +509,6 @@ def _read_optional_json_mapping(path: Path) -> dict[str, Any] | None:
     if not path.is_file():
         return None
     return _read_json_mapping(path)
-
-
-def _read_yaml_mapping(path: Path) -> dict[str, Any]:
-    if not path.is_file():
-        raise ValueError(f"YAML evidence does not exist: {path}")
-    try:
-        loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, yaml.YAMLError) as exc:
-        raise ValueError(f"YAML evidence is unreadable or malformed: {path}: {exc}") from exc
-    if not isinstance(loaded, dict):
-        raise ValueError(f"YAML evidence must be a mapping: {path}")
-    return loaded
 
 
 def _write_yaml(path: Path, payload: dict[str, Any]) -> None:

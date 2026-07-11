@@ -14,7 +14,7 @@ ansible-playbook ansible/playbooks/run_synthetic_workflow.yml \
   -i ansible/inventory/localhost.ini \
   -e run_id=demo_001 \
   -e controlled_source_repo=../controlled-source-demo \
-  -e controlled_source_ref=controlled-source-demo-v0.1.2
+  -e controlled_source_ref=controlled-source-demo-v0.1.1
 ```
 
 The full chain we are about to walk:
@@ -27,9 +27,8 @@ controlled input/tag
         -> raw sim output
           -> extract_required
             -> required.csv
-              -> byte-bound validation
-                -> finalized, hash-identified manifest
-                  -> sibling assembly/smoke hash receipts
+              -> validation
+                -> manifest
 ```
 
 ## Start with the run id
@@ -68,9 +67,9 @@ The run starts from the controlled-source repo at a resolved tag. The manifest
 
 ```yaml
 - name: controlled-source-demo
-  requested_ref: controlled-source-demo-v0.1.2
+  requested_ref: controlled-source-demo-v0.1.1
   resolved_commit: de04ae34ea8706868bcab1b130ad1dac28bc1eee
-  describe: controlled-source-demo-v0.1.2
+  describe: controlled-source-demo-v0.1.1
   worktree_status: clean
 ```
 
@@ -88,11 +87,8 @@ manifest's `inputs` section records the full lineage for each file:
   materialization:
     materialization_mode: copy_from_controlled_source
     source_path: fixtures/controlled_inputs/dirC/ex1.dat
-    source_ref: controlled-source-demo-v0.1.2
+    source_ref: controlled-source-demo-v0.1.1
     source_resolved_commit: de04ae34ea8706868bcab1b130ad1dac28bc1eee
-    source_blob_oid: 0123456789abcdef...
-    source_file_mode: '100644'
-    source_sha256: e9f4ce672451e0dfe5aa0033fb903d4205f365f1ad53a50ac2ca4a586f2642a1
 ```
 
 Note the hash: `e9f4ce672451...`. Hold that thought — it reappears in the CSV.
@@ -101,12 +97,6 @@ The runtime script got the same treatment. `sim-run-root/procs/run-script.sh`
 was not hand-authored; the manifest's `runtime_scripts` section records that it
 was copied from `procs/run-script.sh` at the same resolved commit, with its
 SHA-256 matching the Git-tracked blob recorded under `repositories`.
-
-Those identities come from the selected Git tree, not a later worktree read.
-Inputs and executable code are copied into read-only run-local destinations and
-their modes and hashes are verified immediately before use. Source and
-destination containment is checked before access. Later tag, worktree, or
-inventory edits cannot replace the admitted selected-commit identity.
 
 Note that `dirA`, `dirB`, and `dirC` deliberately repeat across `input/`,
 `lists/`, and `files/`. Every evidence record therefore carries the full
@@ -129,8 +119,6 @@ submission:
   pid: 3028849
   process_group_id: 3028849
   process_start_time_ticks: 73583648
-receipt_id: 4a0f...
-run_id: demo_001
 ```
 
 Submit returned while the job was still running (`state: RUN`). The wait stage
@@ -173,14 +161,6 @@ future_real_lsf_equivalent: [bjobs, bhist, bacct]
 
 Terminal states are `DONE`, `EXIT`, or `TIMEOUT`. Only `DONE` allows the
 workflow to proceed to extraction.
-
-`provenance/validations/scheduler_receipt.json` checks that submission, job
-state, terminal state, accounting, and payload evidence share the same receipt,
-run, and job identities; timestamps are monotonic; terminal and accounting
-status are `DONE`/zero; and the raw-output identity agrees. The manifest embeds
-that coherence verdict under `scheduler.receipt_validation`. Extraction
-recomputes it fresh rather than trusting a stale component or standalone
-`DONE` value.
 
 ## Payload execution evidence
 
@@ -285,8 +265,6 @@ The `validate` stage checked the CSV against
   "total_rows": 4,
   "data_rows": 3,
   "header": ["logical_group", "example", "bytes", "sha256_prefix"],
-  "size_bytes": 129,
-  "sha256": "d02d79e1372bb8ef28ff223f4816d3959dec990c574442cdd93e6d53624be815",
   "checks": [
     {"name": "non_empty",              "status": "pass"},
     {"name": "minimum_data_row_count", "status": "pass"},
@@ -295,9 +273,6 @@ The `validate` stage checked the CSV against
   ]
 }
 ```
-
-Reports verify this path, size, and SHA-256 against current bytes and consume
-those exact bytes. Changed bytes invalidate an earlier pass.
 
 ## Manifest links
 
@@ -325,24 +300,7 @@ document. For `required.csv` specifically:
     size_bytes: 129
   ```
 
-- `validations` — the semantic verdict and exact product size/SHA-256 binding,
-  plus the validation receipt path and receipt SHA-256.
-
-## Final manifest receipts
-
-The manifest includes stages completed before assembly; it does not attempt to
-contain evidence about its own final bytes. After `manifest.yaml` is written,
-`provenance/logs/manifest.stage.json` records its SHA-256. Smoke validates those
-unchanged bytes, stage order/success, artifact hashes, selected-source and
-producer links, scheduler coherence, and successful product validations. It
-then writes `provenance/validations/manifest_smoke.json` and
-`provenance/logs/manifest_smoke.stage.json` with the same manifest hash.
-
-Assembly verifies controlled artifacts against admitted selected-commit
-identities, not mutable inventories. This avoids self-reference: neither finalization receipt is embedded in the
-manifest it finalizes or verifies. The hashes provide local integrity checks
-and selected-commit binding, but no signature, trusted timestamp, tamper-proof
-storage, or immutable archive.
+- `validations` — the shape-check verdict for the same path.
 
 ## What this proves
 
@@ -353,7 +311,7 @@ answer:
   and hash — and the CSV content itself embeds their hash prefixes.
 - **What code produced it?** `scripts/extract_required.pl` from
   `controlled-source-demo` at commit `de04ae3`, tag
-  `controlled-source-demo-v0.1.2`, operating on a raw output produced by the
+  `controlled-source-demo-v0.1.1`, operating on a raw output produced by the
   Git-tracked, hash-recorded `procs/run-script.sh`.
 - **Did the simulation actually finish?** Yes — scheduler-owned terminal
   `DONE` with exit code 0, with the wait history showing the job was genuinely

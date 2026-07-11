@@ -36,7 +36,7 @@ shape intact.
 flowchart TD
     operator["Operator / Engineer<br/>Ubuntu or WSL shell"]
     ansible["Ansible playbook<br/>run_synthetic_workflow.yml"]
-    make["Make stage contract<br/>preflight -> prepare -> materialize<br/>submit -> wait -> collect -> extract<br/>validate -> reports -> inventory -> manifest"]
+    make["Make stage contract<br/>preflight -> prepare -> materialize<br/>submit -> wait -> collect -> extract<br/>reports -> inventory -> validate -> manifest"]
 
     subgraph wrapper["Wrapper repo: ansible-mvp"]
         wrapperFiles["Ansible, Makefile, configs<br/>Python provenance CLI/helpers"]
@@ -45,7 +45,7 @@ flowchart TD
     subgraph controlled["Controlled source repo: ../controlled-source-demo"]
         fixtures["fixtures/controlled_inputs<br/>dirA/dirB/dirC ex*.dat"]
         scripts["Git-tracked scripts<br/>procs/run-script.sh<br/>scripts/synthetic_sim_engine.sh<br/>scripts/extract_required.pl<br/>scripts/ad_hoc_extract.py"]
-        tag["clean resolved ref<br/>controlled-source-demo-v0.1.2"]
+        tag["clean resolved ref<br/>controlled-source-demo-v0.1.1"]
     end
 
     preflight["Hard preflight gate<br/>clean repos, resolved refs, tracked scripts,<br/>approved command paths"]
@@ -67,7 +67,6 @@ flowchart TD
             extracted["products/extracted/*.csv"]
             reports["products/reports<br/>summary.xlsx, chart.png, briefing.pptx"]
             manifest["manifest.yaml<br/>run provenance spine"]
-            receipts["manifest.stage.json + manifest_smoke.json<br/>sibling final-hash receipts"]
         end
     end
 
@@ -96,7 +95,6 @@ flowchart TD
     inv --> manifest
     vals --> manifest
     reports --> manifest
-    manifest --> receipts
 ```
 
 ## Why each tool owns its role
@@ -151,15 +149,6 @@ scripts are missing or untracked, or stage commands point at uncontrolled local
 paths. There is deliberately no non-Git fallback for workflow scripts.
 Generated run products never belong in Git.
 
-Admission resolves each configured artifact from the selected commit and
-records its commit, Git blob ID, tracked mode, and SHA-256. Materialization
-writes read-only run-local copies, and pre-execution verification checks their
-mode and hash before consumption. Execution therefore does not depend on a
-later read from the mutable source worktree. Both source and destination are
-proven contained before direct materialization access. The admitted
-selected-commit identity—not a later mutable tag, worktree, or inventory—remains
-the integrity authority.
-
 ### Why mock LSF
 
 The mock LSF layer emulates the minimal scheduler contract the team actually
@@ -213,8 +202,7 @@ runs/{run_id}/
     ├── scheduler/
     ├── validations/
     │   ├── manifest_smoke.json
-    │   ├── required_extract.json
-    │   └── ad_hoc_extract.json
+    │   └── required_extract.json
     └── products/
         ├── extracted/
         └── reports/
@@ -238,7 +226,7 @@ data, and derived analytical products.
   state, accounting, and scheduler stdout/stderr evidence.
 - `provenance/logs/`: stage logs and `*.stage.json` evidence for every
   configured workflow stage, including support stages such as preflight,
-  materialization, inventories, and the external manifest assembly receipt.
+  materialization, inventories, and manifest assembly.
 - `provenance/manifest.yaml`: the run-level provenance spine.
 
 The repeated `dirA`, `dirB`, and `dirC` folder names are intentional. Tools
@@ -254,8 +242,8 @@ target order and runs one target per task boundary:
 ```text
 preflight -> prepare-workspace -> materialize-inputs -> materialize-procs
 -> inventory-pre -> submit-mock-lsf -> wait-mock-lsf -> collect-mock-lsf
--> extract-required -> extract-ad-hoc -> validate
--> build-reports -> inventory-post -> manifest -> manifest-smoke
+-> extract-required -> extract-ad-hoc -> build-reports
+-> validate -> inventory-post -> manifest -> manifest-smoke
 ```
 
 `run-simulation` remains a Make target for focused debugging and payload stage
@@ -265,10 +253,7 @@ shows submit, wait, collect, extract, report, and validate phases rather than
 direct simulation execution.
 
 `inventory-pre` records pre-run input/script evidence before mock LSF
-submission. Both extracts are semantically validated before report generation;
-each receipt binds the exact CSV size and SHA-256, and reports consume those
-rechecked bytes. Reports are atomically published only from passed inputs. `inventory-post`
-records output evidence after validation and report generation.
+submission; `inventory-post` records output evidence after validation.
 
 ## Controlled source gate
 
@@ -284,13 +269,12 @@ Before execution, `make preflight` verifies:
   materialized runtime script (`procs/run-script.sh`), not an ad hoc local
   command.
 
-The default controlled-source contract is `controlled-source-demo-v0.1.2`.
+The default controlled-source contract is `controlled-source-demo-v0.1.1`.
 The bootstrap command creates that tag for new demo repositories or upgrades a
 clean existing demo repository to the new template without rewriting older
-tags. The v0.1.2 payload includes atomic required and ad hoc extractors and
-accepts controlled runtime-delay environment values so async scheduler runs
-exhibit real submit-before-completion behavior without fake wrapper-owned
-latency.
+tags. The v0.1.1 payload accepts controlled runtime-delay environment values so
+async scheduler runs exhibit real submit-before-completion behavior without
+fake wrapper-owned latency.
 
 ## Scheduler seam
 
@@ -310,9 +294,6 @@ state; collect records final accounting. Evidence lives under
 - `accounting.yaml`: final accounting summary linking job state to payload
   stage evidence and future real-LSF equivalents.
 - `stdout.log` and `stderr.log`: scheduler wrapper streams.
-- `validations/scheduler_receipt.json`: one coherence verdict over receipt ID,
-  scheduler mode, run/job identity, lifecycle timestamps, terminal status,
-  payload evidence, accounting linkage, and raw-output identity.
 
 Extraction is allowed only after terminal scheduler `DONE`; failed or timed
 out jobs leave inspectable evidence and stop later stages instead of faking
@@ -329,8 +310,8 @@ arrays, and production-grade resume semantics remain explicitly deferred.
 ## Hashing policy
 
 SHA-256 is the default hash algorithm. The MVP always hashes scripts,
-configuration, playbooks, the Makefile, small controlled inputs, raw outputs,
-validation receipts, and derived CSV/report products. For large production raw outputs, the future policy may
+configuration, playbooks, the Makefile, small controlled inputs, and derived
+CSV/report products. For large production raw outputs, the future policy may
 record size and modification time by default, with content hashing as an
 explicit opt-in; that decision is intentionally deferred.
 
@@ -342,36 +323,18 @@ includes:
 - run identity, timestamps, and `run.execution_context` (user, host, platform,
   Python and Git versions),
 - repository state: paths, requested refs, resolved commits, branch/tag/
-  describe, dirty status, and selected artifact commit/blob/mode/hash identities,
+  describe, dirty status, tracked script paths, script hashes,
 - controlled source gate result,
 - concise `workflow.operator_flow` summary,
 - input inventory with per-input materialization lineage,
 - mock scheduler submission, job id, terminal state, accounting links,
   scheduler logs, and payload stage evidence,
-- complete pre-assembly stage commands/status/timestamps/log paths,
+- complete stage commands/status/timestamps/log paths,
 - raw simulation output inventory,
 - derived product inventory,
 - validation results,
 - hash status for tracked artifacts,
 - notes and open warnings.
-
-Assembly rejects disagreement with admitted commit/materialization identities.
-Scheduler evidence must be mutually coherent across submission, state,
-terminal verdict, accounting, payload, timestamps, and raw-output hash; smoke
-validation repeats these links against the finalized manifest.
-
-The manifest is finalized once. `logs/manifest.stage.json` is then written as a
-sibling assembly receipt containing the final manifest SHA-256. Post-manifest
-smoke verifies those exact bytes and cross-record semantics, then writes
-`validations/manifest_smoke.json` and `logs/manifest_smoke.stage.json` with the
-same hash. These finalization receipts are intentionally absent from the
-manifest they finalize and verify.
-
-“Finalized” means sibling receipts identify unchanged manifest bytes; it does
-not make the file immutable. This is local capture and selected-commit binding,
-not preservation. The MVP
-does not sign evidence, provide trusted timestamps, make evidence tamper-evident,
-or place it in an immutable archive.
 
 See [`trace_required_csv.md`](trace_required_csv.md) for how these sections
 connect around one artifact.
@@ -388,6 +351,5 @@ connect around one artifact.
 - `manifest.yaml` captures the complete run story.
 - Row/column/header validation for the required CSV product is recorded in
   `provenance/validations/required_extract.json`.
-- Tests and the manifest smoke check verify stage order/success, artifact and
-  validation-receipt hashes, source/producer links, scheduler coherence, and
-  manifest generation.
+- Tests and the manifest smoke check verify inventory, hashing, and manifest
+  generation.
