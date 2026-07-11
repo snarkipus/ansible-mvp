@@ -126,9 +126,15 @@ None required before implementation. If formal manifest schema work (`ansible-mv
 
 ## Implementation Reconciliation
 
-No intentional behavioral deviations remain between this change, the
-synchronized main specifications, and the implementation. In this MVP,
-"immutable per-run code" means read-only materialization from an identified
-selected commit with pre-execution mode and SHA-256 verification. It does not
-mean tamper-proof preservation: signing, trusted timestamps, and immutable
-archival remain unimplemented and are stated as assurance limitations.
+Final archive review found unresolved enforcement gaps in direct
+materialization path containment, integrity checks anchored to admitted Git
+identities, complete scheduler-component coherence, validation-receipt binding,
+manifest finalization against the originally admitted commit, and independent
+post-manifest scheduler verification. The change remains active until these
+gaps and their regression tests are complete.
+
+In this MVP, "immutable per-run code" means read-only materialization from an
+identified selected commit with pre-execution mode and SHA-256 verification. It
+does not mean tamper-proof preservation: signing, trusted timestamps, and
+immutable archival remain unimplemented and are stated as assurance
+limitations.
