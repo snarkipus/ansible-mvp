@@ -53,6 +53,6 @@
 
 - [x] 9.1 Update README, architecture, operator guide, and artifact trace to document selected-commit binding, safe identifiers/paths, coherent local scheduler evidence, validation ordering, post-manifest receipt behavior, and preservation limitations.
 - [x] 9.2 Reconcile main OpenSpec requirements and controlled-source tag references with the implemented behavior and record any intentional deviations before checking off related tasks.
-- [ ] 9.3 Run `make check`, bootstrap/verify `controlled-source-demo-v0.1.2`, and complete the documented Ansible workflow with a fresh run ID; inspect manifest and sibling receipt evidence.
-- [ ] 9.4 Run strict OpenSpec validation and `bd lint --json`, verify every completed OpenSpec task maps to a closed bead or documented rationale, and close the implementation epic before archive review.
+- [x] 9.3 Run `make check`, bootstrap/verify `controlled-source-demo-v0.1.2`, and complete the documented Ansible workflow with a fresh run ID; inspect manifest and sibling receipt evidence.
+- [x] 9.4 Run strict OpenSpec validation and `bd lint --json`, verify every completed OpenSpec task maps to a closed bead or documented rationale, and close the implementation epic before archive review.
 - [x] 9.5 Replace raw Ansible command-result dumps with concise stage failure messages, evidence paths, and focused rerun guidance.
